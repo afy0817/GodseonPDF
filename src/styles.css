@@ -108,10 +108,16 @@ select {
   height: 100%;
   display: grid;
   grid-template-rows: var(--titlebar-h) var(--toolbar-h) var(--options-h) minmax(0, 1fr);
+  /*
+   * 줄마다 칸을 이름으로 못박는다. 윈도우·리눅스는 제목 줄을 숨기는데(display: none) 자동 배치에 맡기면
+   * 숨긴 줄이 칸을 차지하지 않아 아래 줄들이 한 칸씩 밀려 올라가고, 문서 보기 영역이 옵션 막대 높이로 쪼그라든다.
+   */
+  grid-template-areas: 'titlebar' 'toolbar' 'options' 'workspace';
 }
 
 /* 맨 위 제목 줄: 파일 이름 (맥은 창 버튼도 이 줄에 있다) */
 #titlebar {
+  grid-area: titlebar;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -127,6 +133,7 @@ html.electron:not([data-os='darwin']) #titlebar {
 }
 
 #toolbar {
+  grid-area: toolbar;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
@@ -189,6 +196,7 @@ html.electron:not([data-os='darwin']) #titlebar {
 }
 
 #optionsbar {
+  grid-area: options;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -212,6 +220,7 @@ html.electron:not([data-os='darwin']) #titlebar {
 }
 
 #workspace {
+  grid-area: workspace;
   display: grid;
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--drawer-w);
   min-height: 0;
