@@ -758,6 +758,7 @@ onLangChange(() => {
   document.querySelectorAll<HTMLElement>('.thumb-del').forEach((b) => (b.title = t('thumb.delete')));
   document.querySelectorAll<HTMLElement>('.ann-del').forEach((b) => (b.title = t('ann.delete')));
   document.querySelectorAll<HTMLElement>('.ann-text-body').forEach((b) => (b.dataset.placeholder = t('ann.placeholder')));
+  document.querySelectorAll<HTMLElement>('.ann-grip').forEach((b) => (b.title = t('text.grip')));
   document.querySelectorAll<HTMLElement>('.tbl-grip').forEach((b) => (b.title = t('table.grip')));
   document.querySelectorAll<HTMLElement>('.cover-rect').forEach((el) => {
     const a = getAnnotation(el.dataset.id ?? null);

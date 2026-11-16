@@ -1,3 +1,4 @@
+import { clamp } from './geometry';
 import { History, type Snapshot } from './history';
 import { cellBodyOf, readText, renderPageOverlay, setTableHandlers, setTextHandlers, textBodyOf } from './overlay';
 import { emit, getAnnotation, livePages, store } from './store';
@@ -10,6 +11,9 @@ let viewer: Viewer;
 
 /** 편집 중인 글상자의 시작 상태 (실행 취소 기록 여부 판단용) */
 let editOrigin: { id: string; text: string; isNew: boolean } | null = null;
+/** 편집 중인 글상자가 실행 취소 기록에 마지막으로 남은 모습 (null = 아직 기록에 없는 새 글상자) */
+type Recorded = { text: string; x: number; y: number } | null;
+let editRecorded: Recorded = null;
 let liveTextChanged = false;
 let dirtyListener: () => void = () => {};
 
@@ -88,13 +92,19 @@ export function snapshot(): Snapshot {
 let committedDuringEdit = false;
 
 export function commit(coalesceKey?: string) {
-  if (store.editingId) committedDuringEdit = true;
+  if (store.editingId) {
+    committedDuringEdit = true;
+    // 이 기록에 들어간 편집 중 글상자의 모습 (편집을 끝낼 때 같은 내용을 한 번 더 기록하지 않도록)
+    const a = getAnnotation(store.editingId);
+    if (a?.type === 'text') editRecorded = { text: a.text, x: a.x, y: a.y };
+  }
   history.push(snapshot(), coalesceKey);
   emit('history');
 }
 
 export function resetHistory() {
   editOrigin = null;
+  editRecorded = null;
   liveTextChanged = false;
   history.reset(snapshot());
   emit('history');
@@ -179,6 +189,7 @@ export function deleteAnnotation(id: string) {
     store.editingId = null;
     store.editingCell = null;
     editOrigin = null;
+    editRecorded = null;
     liveTextChanged = false;
   }
   store.annotations = store.annotations.filter((x) => x.id !== id);
@@ -290,6 +301,7 @@ export function startCellEditing(id: string, r: number, c: number, caret?: { cli
   store.editingCell = { r, c };
   store.activeCell = { r, c };
   editOrigin = { id, text: a.cells[r][c], isNew: false };
+  editRecorded = null;
   liveTextChanged = false;
   committedDuringEdit = false;
   refresh(pagesOf(prevSel, a));
@@ -402,6 +414,7 @@ export function startEditing(id: string, caret?: { clientX: number; clientY: num
   store.editingId = id;
   store.selectedId = id;
   editOrigin = { id, text: a.text, isNew };
+  editRecorded = isNew ? null : { text: a.text, x: a.x, y: a.y };
   liveTextChanged = false;
   committedDuringEdit = false;
   refresh(pagesOf(prevSel, a));
@@ -421,12 +434,51 @@ export function startEditing(id: string, caret?: { clientX: number; clientY: num
   sel.addRange(range);
 }
 
+/**
+ * 입력 중인 글상자를 끌어 옮기기 직전: 지금까지 입력한 글자를 실행 취소 한 단계로 남긴다.
+ * (실행 취소하면 옮기기 → 입력 순서로 하나씩 되돌아간다)
+ */
+export function checkpointEditing() {
+  const a = getAnnotation(store.editingId);
+  if (a?.type !== 'text' || !a.text.trim()) return; // 빈 글상자는 기록에 남기지 않는다
+  const r = editRecorded;
+  if (r && r.text === a.text && r.x === a.x && r.y === a.y) return; // 이미 기록됨
+  // 열어 보기만 한 '고치기' 글상자는 옮긴 결과만 한 단계로 남긴다
+  const origin = editOrigin?.id === a.id ? editOrigin : null;
+  if (!r && a.cover && origin && a.text.replace(/\s+$/, '') === origin.text.replace(/\s+$/, '')) return;
+  commit();
+}
+
+/** 입력 중인 글상자를 옮긴 뒤 기록. 빈 글상자는 미룬다 (입력을 끝낼 때 함께 남기고, 끝내 비어 있으면 지운다) */
+export function commitEditingMove() {
+  const a = getAnnotation(store.editingId);
+  if (a?.type === 'text' && !a.text.trim()) return;
+  commit();
+}
+
+/** 입력 중인 글상자의 테두리를 눌렀을 때: 그 점에서 가장 가까운 글자 사이로 커서를 옮긴다 */
+export function placeCaretNear(clientX: number, clientY: number) {
+  const a = getAnnotation(store.editingId);
+  if (a?.type !== 'text') return;
+  const body = textBodyOf(viewer.views[a.page], a.id);
+  if (!body) return;
+  if (document.activeElement !== body) body.focus({ preventScroll: true });
+  const r = body.getBoundingClientRect();
+  const range = caretRangeAt(clamp(clientX, r.left + 1, r.right - 1), clamp(clientY, r.top + 1, r.bottom - 1), body);
+  const sel = window.getSelection();
+  if (!range || !sel) return;
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
 export function finishEditing() {
   const id = store.editingId;
   if (!id) return;
   store.editingId = null;
   const origin = editOrigin?.id === id ? editOrigin : null;
   editOrigin = null;
+  const recorded = origin ? editRecorded : null;
+  editRecorded = null;
   const hadLiveChange = liveTextChanged;
   liveTextChanged = false;
   const midEditCommit = committedDuringEdit;
@@ -461,6 +513,8 @@ export function finishEditing() {
     if (document.activeElement === body) body.blur();
   }
   window.getSelection()?.removeAllRanges();
+  // 실행 취소 기록에 아직 없는 변경(글자·위치)이 있는지. 편집 중에 이미 기록했으면 그 뒤로 바뀐 것만 본다.
+  const unrecorded = !origin || !recorded || recorded.text !== a.text || recorded.x !== a.x || recorded.y !== a.y;
 
   if (a.cover) {
     // 기존 글자 고치기: 열어 보기만 하고 바꾸지 않았으면 없던 일로, 글자를 다 지웠으면 '원래 글자 지우기'로 남긴다
@@ -473,7 +527,7 @@ export function finishEditing() {
       return;
     }
     refresh([a.page]);
-    if (!origin || origin.isNew || origin.text !== a.text || midEditCommit) commit();
+    if (unrecorded) commit();
     emit('selection');
     if (hadLiveChange) dirtyListener();
     return;
@@ -489,7 +543,7 @@ export function finishEditing() {
     return;
   }
   refresh([a.page]);
-  if (!origin || origin.isNew || origin.text !== a.text || midEditCommit) commit();
+  if (unrecorded) commit();
   emit('selection');
   if (hadLiveChange) dirtyListener();
 }

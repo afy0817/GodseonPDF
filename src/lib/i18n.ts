@@ -84,7 +84,7 @@ const ko = {
   'opt.font.serif.title': '나눔명조',
   'opt.restore': '원래대로',
   'opt.restore.title': '고치기 전 원래 글자로 되돌리기',
-  'opt.text.hint': '페이지를 클릭해 입력 · Esc: 입력 끝내기',
+  'opt.text.hint': '페이지를 클릭해 입력 · 테두리나 손잡이를 끌어 옮기기 · Esc: 입력 끝내기',
   'opt.replaced.hint': '원래 글자: "{text}" · 저장하면 원래 글자를 지우고 새로 씁니다',
   'opt.otherColor': '다른 색',
   'opt.highlight': '형광펜',
@@ -164,6 +164,7 @@ const ko = {
   'thumb.delete': '이 페이지 삭제',
   'ann.delete': '삭제 (Delete)',
   'ann.placeholder': '텍스트 입력',
+  'text.grip': '끌어서 글상자 옮기기',
   'table.grip': '끌어서 표 옮기기',
   'cover.title': '원래 글자: {text}',
 
@@ -343,7 +344,7 @@ const en: Record<Key, string> = {
   'opt.font.serif.title': 'Nanum Myeongjo',
   'opt.restore': 'Restore',
   'opt.restore.title': 'Go back to the original text',
-  'opt.text.hint': 'Click the page to type · Esc to finish',
+  'opt.text.hint': 'Click the page to type · drag the border or handle to move · Esc to finish',
   'opt.replaced.hint': 'Original: "{text}" · Saving removes the original and writes the new text',
   'opt.otherColor': 'Other color',
   'opt.highlight': 'Highlighter',
@@ -421,6 +422,7 @@ const en: Record<Key, string> = {
   'thumb.delete': 'Delete this page',
   'ann.delete': 'Delete (Delete)',
   'ann.placeholder': 'Type text',
+  'text.grip': 'Drag to move the text box',
   'table.grip': 'Drag to move the table',
   'cover.title': 'Original text: {text}',
 

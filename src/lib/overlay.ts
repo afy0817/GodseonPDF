@@ -54,6 +54,15 @@ function deleteButton(): HTMLButtonElement {
   return b;
 }
 
+/** 글상자를 끌어 옮기는 손잡이 (선택했거나 입력 중일 때 왼쪽 위에 보인다) */
+function moveGrip(): HTMLElement {
+  const g = document.createElement('div');
+  g.className = 'ann-grip';
+  g.title = t('text.grip');
+  g.append(icon('Move', 14));
+  return g;
+}
+
 function findAnnEl(v: PageView, id: string) {
   return v.ann.querySelector<HTMLElement>(`:scope > .ann[data-id="${id}"]`);
 }
@@ -72,13 +81,16 @@ function syncText(v: PageView, a: TextAnnotation): HTMLElement {
     body.addEventListener('input', () => handlers.onInput(a.id, readText(body)));
     body.addEventListener('blur', () => handlers.onBlur(a.id));
     body.addEventListener('keydown', (e) => handlers.onKeyDown(a.id, e));
-    el.append(body, deleteButton());
+    el.append(body, moveGrip(), deleteButton());
     v.ann.append(el);
   }
   const editing = store.editingId === a.id;
   const s = el.style;
   s.left = `${a.x}px`;
   s.top = `${a.y}px`;
+  // 손잡이가 페이지 왼쪽·위 끝 밖으로 잘리지 않도록 (styles.css 의 .ann-grip)
+  s.setProperty('--ax', String(a.x));
+  s.setProperty('--ay', String(a.y));
   s.fontSize = `${a.size}px`;
   s.color = a.color;
   s.fontWeight = a.bold ? '700' : '400';

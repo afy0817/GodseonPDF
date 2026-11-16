@@ -66,7 +66,16 @@ function boundsOf(a: Annotation, v: PageView) {
 // 이동 / 크기 조절
 // ---------------------------------------------------------------------------
 
-function startMove(v: PageView, a: Annotation, e: PointerEvent, onClick?: () => void) {
+interface MoveOptions {
+  /** 끌지 않고 눌렀다 뗐을 때 */
+  onClick?: () => void;
+  /** 처음 끌기 시작할 때 (아직 옮기기 전) */
+  onStart?: () => void;
+  /** 옮긴 뒤 실행 취소 기록 (기본: E.commit) */
+  commit?: () => void;
+}
+
+function startMove(v: PageView, a: Annotation, e: PointerEvent, opts: MoveOptions = {}) {
   const sx = e.clientX;
   const sy = e.clientY;
   const orig = structuredClone(a);
@@ -77,6 +86,7 @@ function startMove(v: PageView, a: Annotation, e: PointerEvent, onClick?: () => 
     e,
     (ev) => {
       if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < DRAG_THRESHOLD) return;
+      if (!moved) opts.onStart?.();
       moved = true;
       const s = viewer.scale;
       const dx = clamp((ev.clientX - sx) / s, keep - (b.x + b.w), v.info.width - keep - b.x);
@@ -95,10 +105,25 @@ function startMove(v: PageView, a: Annotation, e: PointerEvent, onClick?: () => 
         E.refresh([a.page]);
         return;
       }
-      if (moved) E.commit();
-      else onClick?.();
+      if (moved) (opts.commit ?? E.commit)();
+      else opts.onClick?.();
     },
   );
+}
+
+/** 입력 중인 글상자의 손잡이·테두리를 끌면 입력을 끝내지 않고 옮긴다 (커서·입력 중인 글자는 그대로) */
+function moveEditingText(el: HTMLElement, target: Element, e: PointerEvent) {
+  e.preventDefault();
+  const view = viewer.viewOf(el);
+  const a = getAnnotation(el.dataset.id ?? null);
+  if (!view || a?.type !== 'text' || store.editingId !== a.id) return;
+  const { clientX, clientY } = e;
+  startMove(view, a, e, {
+    onStart: E.checkpointEditing,
+    commit: E.commitEditingMove,
+    // 테두리를 누르기만 하면 가장 가까운 자리로 커서를 옮긴다 (손잡이는 아무 일 없음)
+    onClick: target.closest('.ann-grip') ? undefined : () => E.placeCaretNear(clientX, clientY),
+  });
 }
 
 function startResize(v: PageView, a: ImageAnnotation, corner: Corner, e: PointerEvent) {
@@ -246,8 +271,10 @@ function onTablePointerDown(view: PageView, a: TableAnnotation, target: Element,
   const tool = store.tool;
   E.selectCell(a.id, r, c);
   // 끌면 표 이동, 그냥 누르면: 이미 선택된 표(또는 텍스트·표 도구)면 그 칸에 글자 입력
-  startMove(view, a, e, () => {
-    if (wasSelected || tool !== 'select') E.startCellEditing(a.id, r, c, { clientX: e.clientX, clientY: e.clientY });
+  startMove(view, a, e, {
+    onClick: () => {
+      if (wasSelected || tool !== 'select') E.startCellEditing(a.id, r, c, { clientX: e.clientX, clientY: e.clientY });
+    },
   });
 }
 
@@ -444,19 +471,25 @@ function startErase(v: PageView, e: PointerEvent) {
 // 설정
 // ---------------------------------------------------------------------------
 
+/** 입력 중인 글자 영역: 누르면 브라우저 기본 동작(커서 이동·글자 선택) */
+const EDITING_TEXT = '.ann-text.editing > .ann-text-body, .tbl-cell.editing';
+
 export function setupInteractions(v: Viewer) {
   viewer = v;
   const root = v.pagesEl;
 
-  // 편집 중인 글상자 안이 아니면 브라우저 기본 동작(포커스 이동, 텍스트 선택, 이미지 끌기)을 막는다.
+  // 편집 중인 글자 영역이 아니면 브라우저 기본 동작(포커스 이동, 텍스트 선택, 이미지 끌기)을 막는다.
+  // (입력 중인 글상자의 손잡이·테두리를 눌러도 포커스가 그대로 남아 입력이 끝나지 않는다)
   root.addEventListener('mousedown', (e) => {
-    if (!(e.target as Element).closest('.ann-text.editing, .tbl-cell.editing')) e.preventDefault();
+    if (!(e.target as Element).closest(EDITING_TEXT)) e.preventDefault();
   });
 
   root.addEventListener('pointerdown', (e) => {
     if (e.button !== 0 || !store.doc) return;
     const target = e.target as Element;
-    if (target.closest('.ann-text.editing, .tbl-cell.editing')) return; // 커서 이동/텍스트 선택은 기본 동작으로
+    if (target.closest(EDITING_TEXT)) return; // 커서 이동/텍스트 선택은 기본 동작으로
+    const editingText = target.closest<HTMLElement>('.ann-text.editing');
+    if (editingText) return moveEditingText(editingText, target, e);
 
     const wasEditing = !!store.editingId;
     blurActive();
@@ -494,6 +527,11 @@ export function setupInteractions(v: Viewer) {
       const a = getAnnotation(annEl.dataset.id ?? null);
       if (!a) return;
       if (a.type === 'table') return onTablePointerDown(view, a, target, e);
+      if (a.type === 'text' && target.closest('.ann-grip')) {
+        // 손잡이: 끌어서 옮기기만 (눌러도 입력을 시작하지 않는다)
+        E.select(a.id);
+        return startMove(view, a, e);
+      }
       if (tool === 'text' && a.type !== 'text') {
         if (!wasEditing) createText(view, e);
         return;
@@ -505,10 +543,12 @@ export function setupInteractions(v: Viewer) {
       }
       const wasSelected = store.selectedId === a.id;
       E.select(a.id);
-      startMove(view, a, e, () => {
-        if (a.type === 'text' && (tool === 'text' || tool === 'edit' || wasSelected)) {
-          E.startEditing(a.id, { clientX: e.clientX, clientY: e.clientY });
-        }
+      startMove(view, a, e, {
+        onClick: () => {
+          if (a.type === 'text' && (tool === 'text' || tool === 'edit' || wasSelected)) {
+            E.startEditing(a.id, { clientX: e.clientX, clientY: e.clientY });
+          }
+        },
       });
       return;
     }

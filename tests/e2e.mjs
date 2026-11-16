@@ -175,16 +175,59 @@ st = await state();
 const t2 = st.anns.find((a) => a.type === 'text');
 check('글자 스타일 변경', t2.size === 20 && t2.color === '#2563eb' && t2.bold === true, `${t2.size} ${t2.color} ${t2.bold}`);
 
-// 두 번째 글상자 (작은 글씨, 빨강)
-await win.click('[data-tool="text"]');
-pt = await at(60, 740);
-await win.mouse.click(pt.x, pt.y);
-await win.waitForSelector('.ann-text.editing');
-await win.keyboard.type('서명: 홍길동 (2026-11-16)');
-pt = await at(590, 30);
-await win.mouse.click(pt.x, pt.y); // 빈 곳 클릭으로 입력 끝내기
-st = await state();
-check('두 번째 글상자', st.anns.filter((a) => a.type === 'text').length === 2);
+// 두 번째 글상자: 입력하는 중에 손잡이·점선 테두리로 옮기고, 놓은 뒤 이어서 입력
+{
+  await win.click('[data-tool="text"]');
+  pt = await at(60, 740);
+  await win.mouse.click(pt.x, pt.y);
+  await win.waitForSelector('.ann-text.editing');
+  await win.keyboard.type('서명: 홍길동');
+  const second = async () => (await state()).anns.filter((a) => a.type === 'text')[1];
+  const dragBy = async (from, dx, dy) => {
+    await win.mouse.move(from.x, from.y);
+    await win.mouse.down();
+    await win.mouse.move(from.x + dx * s1, from.y + dy * s1, { steps: 8 });
+    await win.mouse.up();
+  };
+  const near = (a, b, dx, dy) => Math.abs(b.x - a.x - dx) < 0.6 && Math.abs(b.y - a.y - dy) < 0.6;
+  const q0 = await second();
+  const gb = await win.locator('.ann-text.editing > .ann-grip').boundingBox();
+  await dragBy({ x: gb.x + gb.width / 2, y: gb.y + gb.height / 2 }, 40, -20); // 왼쪽 위 손잡이
+  await win.keyboard.type(' (2026');
+  const q1 = await second();
+  const eb = await win.locator('.ann-text.editing').boundingBox();
+  await dragBy({ x: eb.x - 4, y: eb.y + eb.height / 2 }, 10, 6); // 점선 테두리 둘레
+  await win.keyboard.type('-11-16)');
+  const q2 = await second();
+  const focusKept = await win.evaluate(() => !!document.activeElement?.matches('.ann-text.editing > .ann-text-body'));
+  pt = await at(590, 30);
+  await win.mouse.click(pt.x, pt.y); // 빈 곳 클릭으로 입력 끝내기
+  st = await state();
+  const q3 = st.anns.filter((a) => a.type === 'text')[1];
+  check('두 번째 글상자', st.anns.filter((a) => a.type === 'text').length === 2);
+  check(
+    '입력 중에 손잡이·테두리로 글상자 옮기기 (입력은 그대로 이어짐)',
+    q3.text === '서명: 홍길동 (2026-11-16)' && near(q0, q1, 40, -20) && near(q1, q2, 10, 6) && near(q2, q3, 0, 0) && focusKept,
+    `${JSON.stringify(q3.text)} (${q0.x.toFixed(1)}, ${q0.y.toFixed(1)}) → (${q1.x.toFixed(1)}, ${q1.y.toFixed(1)}) → (${q3.x.toFixed(1)}, ${q3.y.toFixed(1)}), focus=${focusKept}`,
+  );
+  // 실행 취소: 이어 쓴 글자 → 테두리로 옮기기 → 이어 쓴 글자 → 손잡이로 옮기기 순서로 하나씩 (같은 단계가 두 번 남지 않음)
+  const undone = [];
+  for (let i = 0; i < 4; i++) {
+    await win.click('[data-cmd="undo"]');
+    undone.push(await second());
+  }
+  for (let i = 0; i < 4; i++) await win.click('[data-cmd="redo"]');
+  const redone = await second();
+  check(
+    '입력 중 옮기기: 실행 취소 단계 (글자·옮기기 따로)',
+    undone[0].text === '서명: 홍길동 (2026' && near(q2, undone[0], 0, 0) &&
+      undone[1].text === '서명: 홍길동 (2026' && near(q1, undone[1], 0, 0) &&
+      undone[2].text === '서명: 홍길동' && near(q1, undone[2], 0, 0) &&
+      undone[3].text === '서명: 홍길동' && near(q0, undone[3], 0, 0) &&
+      JSON.stringify(redone) === JSON.stringify(q3),
+    undone.map((a) => `${JSON.stringify(a.text)}@(${a.x.toFixed(1)}, ${a.y.toFixed(1)})`).join(' ← '),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // 4. 형광펜
