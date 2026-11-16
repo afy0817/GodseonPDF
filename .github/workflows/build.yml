@@ -1,0 +1,219 @@
+name: Build
+
+# 버전 태그(v1.0.0, v1.1.0-beta 등)를 push 할 때만 돈다: 검사 → 세 OS 빌드 → Release.
+# main 에 push 하거나 PR 을 열 때는 돌지 않는다.
+#
+# 윈도우 코드 서명 (SignPath Foundation, 오픈 소스 무료): 저장소 Secrets 에 SIGNPATH_API_TOKEN, 변수(Variables)에
+# SIGNPATH_ORGANIZATION_ID 가 있을 때만 서명한다 (없으면 서명 없이 빌드). 서명 요청은 릴리스마다 두 번이고 SignPath 에서 승인해야 끝난다:
+#   1) GodseonPDF.exe + 제거 프로그램  2) 설치 파일. SignPath 에 넣을 아티팩트 설정은 .signpath/artifact-configurations/*.xml
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+*"]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Version
+        run: |
+          VERSION="$(git describe --tags --always)"; VERSION="${VERSION#v}"
+          npm pkg set version="$VERSION"
+      - run: npm ci
+      - name: Build dmg (arm64, x64)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false" # 개발자 인증서 없이 ad-hoc 서명 (scripts/after-pack.cjs)
+        run: npm run build && npx electron-builder --mac --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          path: release/*.dmg
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      actions: read # SignPath 가 이 작업과 산출물을 읽는다
+    env:
+      SIGN: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Version
+        run: |
+          VERSION="$(git describe --tags --always)"; VERSION="${VERSION#v}"
+          NUMVER="${VERSION%%[!0-9.]*}" # 윈도우 버전 정보는 숫자만 (1.1.0-beta → 1.1.0) — SignPath 도 이 값으로 확인한다
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "NUMVER=$NUMVER" >> "$GITHUB_ENV"
+          # 앱 버전은 태그 그대로, exe 버전 정보(파일·제품 버전)는 숫자만 — electron-builder 가 shortVersion(Windows) 을 쓴다
+          npm pkg set version="$VERSION" shortVersion="$NUMVER" shortVersionWindows="$NUMVER"
+          ISCC="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          if [ ! -f "$ISCC" ]; then choco install innosetup -y --no-progress; fi
+          echo "ISCC=$ISCC" >> "$GITHUB_ENV"
+          echo "서명: $SIGN"
+      - run: npm ci
+      - name: Build app (release/win-unpacked)
+        run: npm run build && npx electron-builder --win --x64 --publish never
+
+      # ---- 서명 1: GodseonPDF.exe + 제거 프로그램 (SignPath 설정이 있을 때만)
+      - name: Prepare files for signing (exe, uninstaller)
+        if: env.SIGN == 'true'
+        run: |
+          mkdir -p build/sign1 build/uninst
+          # 서명 도구 없이 SignedUninstaller=yes 로 컴파일하면 build/uninst/uninst-<버전>-<해시>.e32 를 만들고 '서명 필요' 로 멈춘다 (정상)
+          # Git Bash 는 / 로 시작하는 인자를 경로로 바꾼다 (/DAppVersion=… → C:/Program Files/Git/DAppVersion=…) → ISCC 명령만 끈다
+          MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$ISCC" "/DAppVersion=$VERSION" "/DAppNumVersion=$NUMVER" /DSignUninstaller packaging/windows/GodseonPDF.iss > build/iscc-uninst.log 2>&1 || true
+          UNINST="$(ls build/uninst/uninst-*.e32 build/uninst/uninst-*.e64 2>/dev/null | head -1)"
+          if [ -z "$UNINST" ]; then cat build/iscc-uninst.log; echo "제거 프로그램 사본이 생기지 않았습니다" >&2; exit 1; fi
+          echo "UNINST=$UNINST" >> "$GITHUB_ENV"
+          cp release/win-unpacked/GodseonPDF.exe build/sign1/GodseonPDF.exe
+          cp "$UNINST" build/sign1/uninstaller.exe # SignPath 의 pe-file 은 .exe 이름으로
+      - name: Upload unsigned exe and uninstaller
+        id: unsigned1
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-binaries
+          path: build/sign1/
+      - name: Sign exe and uninstaller (SignPath — approve the request)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'GodseonPDF' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: binaries
+          github-artifact-id: ${{ steps.unsigned1.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600 # 승인을 기다린다
+          output-artifact-directory: build/signed1
+          parameters: |
+            version: "${{ env.NUMVER }}"
+      - name: Use signed exe and uninstaller
+        if: env.SIGN == 'true'
+        run: |
+          cp build/signed1/GodseonPDF.exe release/win-unpacked/GodseonPDF.exe
+          cp build/signed1/uninstaller.exe "$UNINST"
+
+      - name: Portable zip
+        run: |
+          mkdir -p dist
+          (cd release/win-unpacked && 7z a -tzip -mx=7 "../../dist/GodseonPDF-$VERSION-windows-portable.zip" . > /dev/null)
+
+      - name: Build installer (Inno Setup)
+        run: |
+          MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$ISCC" "/DAppVersion=$VERSION" "/DAppNumVersion=$NUMVER" ${{ env.SIGN == 'true' && '/DSignUninstaller' || '' }} packaging/windows/GodseonPDF.iss
+
+      # ---- 서명 2: 설치 파일
+      - name: Prepare installer for signing
+        if: env.SIGN == 'true'
+        run: mkdir -p build/sign2 && cp "dist/GodseonPDF-$VERSION-windows-setup.exe" build/sign2/setup.exe
+      - name: Upload unsigned installer
+        id: unsigned2
+        if: env.SIGN == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installer
+          path: build/sign2/
+      - name: Sign installer (SignPath — approve the request)
+        if: env.SIGN == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'GodseonPDF' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: installer
+          github-artifact-id: ${{ steps.unsigned2.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: build/signed2
+          parameters: |
+            version: "${{ env.NUMVER }}"
+      - name: Use signed installer
+        if: env.SIGN == 'true'
+        run: cp build/signed2/setup.exe "dist/GodseonPDF-$VERSION-windows-setup.exe"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+
+  linux:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Version
+        run: |
+          VERSION="$(git describe --tags --always)"; VERSION="${VERSION#v}"
+          npm pkg set version="$VERSION"
+      - run: npm ci
+      - name: Build AppImage and deb (x64, arm64)
+        run: npm run build && npx electron-builder --linux --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: |
+            release/*.AppImage
+            release/*.deb
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [macos, windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: release-* # 서명 전 파일(unsigned-*)은 올리지 않는다
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body: "[Code signing policy](https://github.com/afy0817/GodseonPDF#code-signing-policy)"
+          generate_release_notes: true

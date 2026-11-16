@@ -1,0 +1,58 @@
+# electron-builder 설정
+#   npm run dist:mac    → release/GodseonPDF-<버전>-mac-<arm64|x64>.dmg   (ad-hoc 서명, scripts/after-pack.cjs)
+#   npm run dist:linux  → release/GodseonPDF-<버전>-linux-<arch>.AppImage / .deb
+#   npm run dist:win    → release/win-unpacked (실행 파일 폴더). 설치 파일은 GodseonSync 와 같이
+#                         Inno Setup(packaging/windows/GodseonPDF.iss)으로 만들고, 코드 서명은 GitHub Actions 의 SignPath 로 한다.
+appId: io.github.afy0817.godseonpdf
+productName: GodseonPDF
+copyright: Copyright (c) 2026 afy0817
+directories:
+  output: release
+  buildResources: build
+files:
+  - electron/**
+  - dist/renderer/**
+  - package.json
+  - "!**/*.map"
+asar: true
+electronLanguages:
+  - ko
+  - en-US
+afterPack: scripts/after-pack.cjs
+afterSign: scripts/after-sign.cjs
+fileAssociations:
+  - ext: pdf
+    name: PDF Document
+    description: PDF Document
+    mimeType: application/pdf
+    role: Editor
+    rank: Alternate
+
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.png
+  identity: null # Apple 개발자 인증서가 없으므로 electron-builder 서명은 건너뛰고 after-pack 에서 ad-hoc 서명
+  darkModeSupport: true
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: dir
+      arch: [x64]
+
+linux:
+  icon: build/icon.png
+  category: Office
+  executableName: godseonpdf
+  synopsis: PDF editor - text, images, highlighter, tables, page deletion
+  maintainer: afy0817 <afy0817@users.noreply.github.com>
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SignPath 아티팩트 설정 'binaries': 릴리스 워크플로의 첫 서명 요청 (GodseonPDF.exe + Inno Setup 제거 프로그램).
+     version 은 워크플로가 넘기는 윈도우 버전 숫자 (태그 v0.2.0-beta → 0.2.0).
+     GodseonPDF.exe 의 제품 버전은 electron-builder 가 package.json 의 shortVersionWindows 로 넣는다 (워크플로가 같은 값으로 설정). -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <pe-file path="GodseonPDF.exe" product-name="GodseonPDF" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="uninstaller.exe" product-name="GodseonPDF" product-version="${version}">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

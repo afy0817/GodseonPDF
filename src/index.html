@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GodseonPDF</title>
+    <link rel="icon" href="./icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app" class="no-doc">
+      <header id="toolbar">
+        <div class="tb-group tb-left">
+          <button class="icon-btn" data-cmd="toggleSidebar" title="페이지 목록 보기/숨기기"><i data-icon="PanelLeft"></i></button>
+          <span class="tb-sep"></span>
+          <button class="btn" data-cmd="open" title="PDF 열기 (Ctrl/⌘+O)"><i data-icon="FolderOpen"></i><span>열기</span></button>
+          <button class="btn btn-primary" data-cmd="save" data-needs-doc title="저장 (Ctrl/⌘+S)"><i data-icon="Save"></i><span>저장</span></button>
+          <button class="icon-btn" data-cmd="saveAs" data-needs-doc title="다른 이름으로 저장 (Ctrl/⌘+Shift+S)"><i data-icon="SaveAll"></i></button>
+          <div id="doc-title" class="doc-title" title=""></div>
+        </div>
+
+        <div class="tb-group tb-center" role="toolbar" aria-label="편집 도구">
+          <div class="segmented">
+            <button class="tool-btn" data-tool="select" data-needs-doc title="선택 · 이동 (V)"><i data-icon="MousePointer2"></i><span>선택</span></button>
+            <button class="tool-btn" data-tool="text" data-needs-doc title="글자 입력 (T)"><i data-icon="Type"></i><span>텍스트</span></button>
+            <button class="tool-btn" data-tool="highlight" data-needs-doc title="형광펜 (H)"><i data-icon="Highlighter"></i><span>형광펜</span></button>
+            <button class="tool-btn" data-tool="eraser" data-needs-doc title="형광펜 지우개 (E)"><i data-icon="Eraser"></i><span>지우개</span></button>
+            <button class="tool-btn" data-tool="table" data-needs-doc title="표 넣기 (G)"><i data-icon="Table"></i><span>표</span></button>
+          </div>
+          <button class="btn" data-cmd="insertImage" data-needs-doc title="이미지 삽입 (I)"><i data-icon="ImagePlus"></i><span>이미지</span></button>
+        </div>
+
+        <div class="tb-group tb-right">
+          <button class="icon-btn" data-cmd="undo" data-needs-doc title="실행 취소 (Ctrl/⌘+Z)"><i data-icon="Undo2"></i></button>
+          <button class="icon-btn" data-cmd="redo" data-needs-doc title="다시 실행 (Ctrl/⌘+Shift+Z)"><i data-icon="Redo2"></i></button>
+          <span class="tb-sep"></span>
+          <button class="icon-btn" data-cmd="zoomOut" data-needs-doc title="축소 (Ctrl/⌘+-)"><i data-icon="ZoomOut"></i></button>
+          <button id="zoom-label" class="zoom-label" data-cmd="zoomFit" data-needs-doc title="폭에 맞추기 (Ctrl/⌘+9)">100%</button>
+          <button class="icon-btn" data-cmd="zoomIn" data-needs-doc title="확대 (Ctrl/⌘+=)"><i data-icon="ZoomIn"></i></button>
+        </div>
+      </header>
+
+      <div id="optionsbar">
+        <div id="options" class="options"></div>
+        <div class="options-right">
+          <div class="page-nav" data-needs-doc>
+            <input id="page-input" type="text" inputmode="numeric" aria-label="현재 페이지" />
+            <span id="page-total">/ 0</span>
+          </div>
+          <button class="btn btn-danger-ghost" data-cmd="deletePages" data-needs-doc title="선택한 페이지 삭제 (페이지 목록에서 Delete)">
+            <i data-icon="Trash"></i><span>페이지 삭제</span>
+          </button>
+        </div>
+      </div>
+
+      <div id="workspace">
+        <aside id="sidebar">
+          <div class="sidebar-header">
+            <span>페이지</span>
+            <span id="sidebar-count" class="muted"></span>
+          </div>
+          <div id="thumbs" tabindex="0" aria-label="페이지 목록"></div>
+        </aside>
+
+        <main id="viewer">
+          <div id="pages"></div>
+          <section id="empty-state">
+            <div class="empty-card">
+              <div class="empty-icon"><i data-icon="FileText"></i></div>
+              <h1>PDF를 열어 편집을 시작하세요</h1>
+              <p>글자 입력 · 이미지 첨부 · 형광펜 · 페이지 삭제</p>
+              <button class="btn btn-primary btn-lg" data-cmd="open"><i data-icon="FolderOpen"></i><span>PDF 열기</span></button>
+              <p class="muted small">또는 PDF 파일을 이 창으로 끌어다 놓으세요</p>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      <div id="drop-overlay">
+        <div class="drop-card">
+          <i data-icon="FileUp"></i>
+          <p id="drop-text">여기에 놓으세요</p>
+        </div>
+      </div>
+      <div id="toasts" aria-live="polite">
+        <div id="busy" hidden><div class="spinner"></div><span id="busy-text">처리 중…</span></div>
+      </div>
+      <input type="file" id="image-input" accept="image/*" multiple hidden />
+      <input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden />
+    </div>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
