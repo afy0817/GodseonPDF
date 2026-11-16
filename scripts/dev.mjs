@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
-import electronPath from 'electron';
+import { electronBinary } from './electron-bin.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -14,7 +14,7 @@ await server.listen();
 const url = server.resolvedUrls?.local?.[0] ?? 'http://localhost:5173/';
 console.log(`[dev] renderer: ${url}`);
 
-const child = spawn(electronPath, [root, ...process.argv.slice(2)], {
+const child = spawn(electronBinary(root), [root, ...process.argv.slice(2)], {
   stdio: 'inherit',
   env: { ...process.env, VITE_DEV_SERVER_URL: url },
 });

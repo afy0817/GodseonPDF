@@ -1,5 +1,6 @@
 import fontkit from '@cantoo/fontkit';
-import { type FontKey, fontBytes } from './fonts';
+import { t } from './i18n';
+import { type FontKey, fontBytes, type FontStyle, textFontKey } from './fonts';
 
 /**
  * 글꼴 파일의 글자 폭(hmtx)으로 글줄 너비를 재고 줄을 나눈다.
@@ -13,18 +14,18 @@ interface Metrics {
   font: { unitsPerEm: number; hasGlyphForCodePoint(cp: number): boolean; glyphForCodePoint(cp: number): { advanceWidth: number } };
 }
 
-let metrics: Record<FontKey, Metrics> | null = null;
+const metrics = new Map<FontKey, Metrics>();
 
-function load(): Record<FontKey, Metrics> {
-  if (metrics) return metrics;
-  const make = (key: FontKey): Metrics => {
+function load(key: FontKey): Metrics {
+  let m = metrics.get(key);
+  if (!m) {
     const bytes = fontBytes[key];
-    if (!bytes) throw new Error('글꼴이 아직 준비되지 않았습니다.');
+    if (!bytes) throw new Error(t('err.fontsNotReady'));
     const font = fontkit.create(bytes as never) as unknown as Metrics['font'];
-    return { font, upm: font.unitsPerEm, adv: new Map(), has: new Map() };
-  };
-  metrics = { regular: make('regular'), bold: make('bold'), fallbackRegular: make('fallbackRegular'), fallbackBold: make('fallbackBold') };
-  return metrics;
+    m = { font, upm: font.unitsPerEm, adv: new Map(), has: new Map() };
+    metrics.set(key, m);
+  }
+  return m;
 }
 
 function has(m: Metrics, cp: number) {
@@ -45,10 +46,9 @@ function advance(m: Metrics, cp: number) {
   return v;
 }
 
-export function measureText(text: string, size: number, bold: boolean): number {
-  const f = load();
-  const primary = bold ? f.bold : f.regular;
-  const fallback = bold ? f.fallbackBold : f.fallbackRegular;
+export function measureText(text: string, size: number, bold: boolean, font?: FontStyle): number {
+  const primary = load(textFontKey(font, bold));
+  const fallback = load(bold ? 'fallbackBold' : 'fallbackRegular');
   let w = 0;
   for (const ch of text) {
     const cp = ch.codePointAt(0)!;
@@ -56,6 +56,35 @@ export function measureText(text: string, size: number, bold: boolean): number {
     w += advance(m, cp);
   }
   return w * size;
+}
+
+/** 우리 글꼴(본 글꼴 또는 보조 글꼴)에 있는 문자인지 */
+export function hasGlyph(cp: number, bold: boolean, font?: FontStyle): boolean {
+  return cp <= 0x20 || has(load(textFontKey(font, bold)), cp) || has(load(bold ? 'fallbackBold' : 'fallbackRegular'), cp);
+}
+
+// 어느 글꼴에도 없는 문자를 모양이 거의 같은 문자로 (원래 PDF 글자를 옮겨 쓸 때만)
+const LOOKALIKE: Record<string, string> = {
+  '\u2219': '\u00b7', // ∙ → ·
+  '\u2027': '\u00b7',
+  '\u30fb': '\u00b7',
+  '\uff65': '\u00b7',
+  '\u2010': '-',
+  '\u2011': '-',
+  '\u2012': '-',
+  '\u2015': '\u2014',
+  '\u00a0': ' ',
+  '\u2007': ' ',
+  '\u202f': ' ',
+};
+
+export function substituteMissing(text: string, bold: boolean, font?: FontStyle): string {
+  let out = '';
+  for (const ch of text) {
+    const alt = LOOKALIKE[ch];
+    out += alt && !hasGlyph(ch.codePointAt(0)!, bold, font) ? alt : ch;
+  }
+  return out;
 }
 
 /**

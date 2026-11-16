@@ -6,8 +6,10 @@ GodseonPDF 는 PC 에서 PDF 파일을 열고 고쳐 저장하는 데스크톱 �
 
 ## 다루는 데이터
 
-- 사용자가 직접 연 PDF 파일과, 페이지에 넣으려고 고른 이미지 파일만 읽습니다.
-- 편집한 결과는 사용자가 저장을 누를 때, 사용자가 고른 위치에만 씁니다.
+- 사용자가 직접 연 PDF 파일과, 페이지에 넣으려고 고른 이미지·글꼴 파일만 읽습니다.
+- 편집한 결과는 사용자가 저장을 누를 때, 사용자가 고른 위치에만 씁니다. 이미지로 내보낼 때도 사용자가 고른 위치에만 씁니다.
+- 직접 그린 **서명**과 추가한 글꼴은 다시 쓰도록 그 PC 의 앱 데이터 폴더(`signatures`, `fonts`)에만 저장합니다.
+  서랍에서 지우면 그 파일도 지워집니다.
 
 ## 데이터가 오가는 곳
 
@@ -32,7 +34,9 @@ Effective: 2026-11-16
 
 GodseonPDF is a desktop program for opening, editing and saving PDF files on your computer.
 
-- It reads only the PDF files you open and the images you choose to insert, and writes only where you choose when you save.
+- It reads only the PDF files you open and the images and fonts you choose to add, and writes only where you choose when you save or export.
+- Signatures you draw and fonts you add are kept only in the app data folder on your computer (`signatures`, `fonts`) so you can reuse them;
+  removing one from the app deletes its file.
 - **It sends nothing over the network** — no file contents, usage data or device information goes to the developer or anyone else.
   There is no telemetry, advertising, analytics or update check.
 - Electron (Chromium) keeps its cache and settings only in the app data folder on your computer; deleting it does not affect the program.

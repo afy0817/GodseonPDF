@@ -9,34 +9,38 @@
   </head>
   <body>
     <div id="app" class="no-doc">
+      <div id="titlebar"><div id="doc-title" class="doc-title">GodseonPDF</div></div>
       <header id="toolbar">
         <div class="tb-group tb-left">
-          <button class="icon-btn" data-cmd="toggleSidebar" title="페이지 목록 보기/숨기기"><i data-icon="PanelLeft"></i></button>
+          <button class="icon-btn" data-cmd="toggleSidebar" data-i18n-title="tb.sidebar"><i data-icon="PanelLeft"></i></button>
           <span class="tb-sep"></span>
-          <button class="btn" data-cmd="open" title="PDF 열기 (Ctrl/⌘+O)"><i data-icon="FolderOpen"></i><span>열기</span></button>
-          <button class="btn btn-primary" data-cmd="save" data-needs-doc title="저장 (Ctrl/⌘+S)"><i data-icon="Save"></i><span>저장</span></button>
-          <button class="icon-btn" data-cmd="saveAs" data-needs-doc title="다른 이름으로 저장 (Ctrl/⌘+Shift+S)"><i data-icon="SaveAll"></i></button>
-          <div id="doc-title" class="doc-title" title=""></div>
+          <button class="btn" data-cmd="open" data-i18n-title="tb.open.title"><i data-icon="FolderOpen"></i><span data-i18n="tb.open">열기</span></button>
+          <button class="btn btn-primary" data-cmd="save" data-needs-doc data-i18n-title="tb.save.title"><i data-icon="Save"></i><span data-i18n="tb.save">저장</span></button>
+          <button class="icon-btn" data-cmd="saveAs" data-needs-doc data-i18n-title="tb.saveAs.title"><i data-icon="SaveAll"></i></button>
         </div>
 
-        <div class="tb-group tb-center" role="toolbar" aria-label="편집 도구">
+        <div class="tb-group tb-center" role="toolbar" data-i18n-aria="tb.tools">
           <div class="segmented">
-            <button class="tool-btn" data-tool="select" data-needs-doc title="선택 · 이동 (V)"><i data-icon="MousePointer2"></i><span>선택</span></button>
-            <button class="tool-btn" data-tool="text" data-needs-doc title="글자 입력 (T)"><i data-icon="Type"></i><span>텍스트</span></button>
-            <button class="tool-btn" data-tool="highlight" data-needs-doc title="형광펜 (H)"><i data-icon="Highlighter"></i><span>형광펜</span></button>
-            <button class="tool-btn" data-tool="eraser" data-needs-doc title="형광펜 지우개 (E)"><i data-icon="Eraser"></i><span>지우개</span></button>
-            <button class="tool-btn" data-tool="table" data-needs-doc title="표 넣기 (G)"><i data-icon="Table"></i><span>표</span></button>
+            <button class="tool-btn" data-tool="select" data-needs-doc data-i18n-title="tool.select.title"><i data-icon="MousePointer2"></i><span data-i18n="tool.select">선택</span></button>
+            <button class="tool-btn" data-tool="text" data-needs-doc data-i18n-title="tool.text.title"><i data-icon="Type"></i><span data-i18n="tool.text">텍스트</span></button>
+            <button class="tool-btn" data-tool="edit" data-needs-doc data-i18n-title="tool.edit.title"><i data-icon="Replace"></i><span data-i18n="tool.edit">글자 고치기</span></button>
+            <button class="tool-btn" data-tool="highlight" data-needs-doc data-i18n-title="tool.highlight.title"><i data-icon="Highlighter"></i><span data-i18n="tool.highlight">형광펜</span></button>
+            <button class="tool-btn" data-tool="eraser" data-needs-doc data-i18n-title="tool.eraser.title"><i data-icon="Eraser"></i><span data-i18n="tool.eraser">지우개</span></button>
+            <button class="tool-btn" data-tool="table" data-needs-doc data-i18n-title="tool.table.title"><i data-icon="Table"></i><span data-i18n="tool.table">표</span></button>
           </div>
-          <button class="btn" data-cmd="insertImage" data-needs-doc title="이미지 삽입 (I)"><i data-icon="ImagePlus"></i><span>이미지</span></button>
+          <button class="btn" data-cmd="insertImage" data-needs-doc data-i18n-title="tb.image.title"><i data-icon="ImagePlus"></i><span data-i18n="tb.image">이미지</span></button>
+          <button class="btn" id="sig-toggle" data-cmd="toggleSignatures" aria-pressed="false" data-i18n-title="tb.signature.title"><i data-icon="Signature"></i><span data-i18n="tb.signature">서명</span></button>
         </div>
 
         <div class="tb-group tb-right">
-          <button class="icon-btn" data-cmd="undo" data-needs-doc title="실행 취소 (Ctrl/⌘+Z)"><i data-icon="Undo2"></i></button>
-          <button class="icon-btn" data-cmd="redo" data-needs-doc title="다시 실행 (Ctrl/⌘+Shift+Z)"><i data-icon="Redo2"></i></button>
+          <button class="icon-btn" data-cmd="undo" data-needs-doc data-i18n-title="tb.undo.title"><i data-icon="Undo2"></i></button>
+          <button class="icon-btn" data-cmd="redo" data-needs-doc data-i18n-title="tb.redo.title"><i data-icon="Redo2"></i></button>
           <span class="tb-sep"></span>
-          <button class="icon-btn" data-cmd="zoomOut" data-needs-doc title="축소 (Ctrl/⌘+-)"><i data-icon="ZoomOut"></i></button>
-          <button id="zoom-label" class="zoom-label" data-cmd="zoomFit" data-needs-doc title="폭에 맞추기 (Ctrl/⌘+9)">100%</button>
-          <button class="icon-btn" data-cmd="zoomIn" data-needs-doc title="확대 (Ctrl/⌘+=)"><i data-icon="ZoomIn"></i></button>
+          <button class="icon-btn" data-cmd="zoomOut" data-needs-doc data-i18n-title="tb.zoomOut.title"><i data-icon="ZoomOut"></i></button>
+          <button id="zoom-label" class="zoom-label" data-cmd="zoomFit" data-needs-doc data-i18n-title="tb.zoomFit.title">100%</button>
+          <button class="icon-btn" data-cmd="zoomIn" data-needs-doc data-i18n-title="tb.zoomIn.title"><i data-icon="ZoomIn"></i></button>
+          <span class="tb-sep"></span>
+          <button class="icon-btn lang-btn" data-cmd="toggleLanguage" data-i18n-title="tb.lang.title"><i data-icon="Languages"></i></button>
         </div>
       </header>
 
@@ -44,11 +48,14 @@
         <div id="options" class="options"></div>
         <div class="options-right">
           <div class="page-nav" data-needs-doc>
-            <input id="page-input" type="text" inputmode="numeric" aria-label="현재 페이지" />
+            <input id="page-input" type="text" inputmode="numeric" data-i18n-aria="nav.page" />
             <span id="page-total">/ 0</span>
           </div>
-          <button class="btn btn-danger-ghost" data-cmd="deletePages" data-needs-doc title="선택한 페이지 삭제 (페이지 목록에서 Delete)">
-            <i data-icon="Trash"></i><span>페이지 삭제</span>
+          <button class="btn btn-ghost" data-cmd="exportImages" data-needs-doc data-i18n-title="nav.exportImages.title">
+            <i data-icon="ImageDown"></i><span data-i18n="nav.exportImages">이미지로 저장</span>
+          </button>
+          <button class="btn btn-danger-ghost" data-cmd="deletePages" data-needs-doc data-i18n-title="nav.deletePages.title">
+            <i data-icon="Trash"></i><span data-i18n="nav.deletePages">페이지 삭제</span>
           </button>
         </div>
       </div>
@@ -56,10 +63,10 @@
       <div id="workspace">
         <aside id="sidebar">
           <div class="sidebar-header">
-            <span>페이지</span>
+            <span data-i18n="sidebar.title">페이지</span>
             <span id="sidebar-count" class="muted"></span>
           </div>
-          <div id="thumbs" tabindex="0" aria-label="페이지 목록"></div>
+          <div id="thumbs" tabindex="0" data-i18n-aria="sidebar.list"></div>
         </aside>
 
         <main id="viewer">
@@ -67,26 +74,42 @@
           <section id="empty-state">
             <div class="empty-card">
               <div class="empty-icon"><i data-icon="FileText"></i></div>
-              <h1>PDF를 열어 편집을 시작하세요</h1>
-              <p>글자 입력 · 이미지 첨부 · 형광펜 · 페이지 삭제</p>
-              <button class="btn btn-primary btn-lg" data-cmd="open"><i data-icon="FolderOpen"></i><span>PDF 열기</span></button>
-              <p class="muted small">또는 PDF 파일을 이 창으로 끌어다 놓으세요</p>
+              <h1 data-i18n="empty.title">PDF를 열어 편집을 시작하세요</h1>
+              <p data-i18n="empty.features">글자 입력 · 글자 고치기 · 이미지 · 형광펜 · 표 · 페이지 삭제</p>
+              <button class="btn btn-primary btn-lg" data-cmd="open"><i data-icon="FolderOpen"></i><span data-i18n="empty.open">PDF 열기</span></button>
+              <p class="muted small" data-i18n="empty.drop">또는 PDF 파일을 이 창으로 끌어다 놓으세요</p>
             </div>
           </section>
         </main>
+
+        <aside id="drawer" data-i18n-aria="sig.drawer">
+          <div class="drawer-header">
+            <span data-i18n="sig.drawer">서명</span>
+            <button class="icon-btn" data-cmd="toggleSignatures" data-i18n-title="common.close"><i data-icon="X"></i></button>
+          </div>
+          <div class="drawer-body">
+            <button class="btn drawer-new" data-cmd="newSignature"><i data-icon="Plus"></i><span data-i18n="sig.new">새 서명 만들기</span></button>
+            <div id="sig-list" class="sig-list"></div>
+          </div>
+          <p class="drawer-hint" data-i18n="sig.hint">끌어서 페이지에 놓거나, 눌러서 지금 보는 페이지에 넣습니다.</p>
+        </aside>
       </div>
 
       <div id="drop-overlay">
         <div class="drop-card">
           <i data-icon="FileUp"></i>
-          <p id="drop-text">여기에 놓으세요</p>
+          <p id="drop-text" data-i18n="drop.here">여기에 놓으세요</p>
         </div>
       </div>
       <div id="toasts" aria-live="polite">
-        <div id="busy" hidden><div class="spinner"></div><span id="busy-text">처리 중…</span></div>
+        <div id="busy" hidden>
+          <div class="spinner"></div><span id="busy-text" data-i18n="busy.default">처리 중…</span>
+          <button id="busy-cancel" type="button" hidden data-i18n="common.cancel">취소</button>
+        </div>
       </div>
       <input type="file" id="image-input" accept="image/*" multiple hidden />
       <input type="file" id="pdf-input" accept="application/pdf,.pdf" hidden />
+      <input type="file" id="font-input" accept=".ttf,.otf,.ttc,.otc,.woff,font/ttf,font/otf,font/collection,font/woff" hidden />
     </div>
     <script type="module" src="./main.ts"></script>
   </body>

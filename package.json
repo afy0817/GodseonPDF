@@ -13,13 +13,14 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/copy-assets.mjs && vite build",
-    "start": "npm run build && electron .",
+    "start": "npm run build && node scripts/start.mjs",
     "typecheck": "tsc --noEmit",
     "test:e2e": "node tests/e2e.mjs",
     "dist": "npm run build && electron-builder",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:win": "npm run build && electron-builder --win",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist:linux": "npm run build && electron-builder --linux",
+    "test:unit": "node --test tests/content-edit.test.mjs tests/image-export.test.mjs"
   },
   "devDependencies": {
     "@cantoo/fontkit": "2.0.12",

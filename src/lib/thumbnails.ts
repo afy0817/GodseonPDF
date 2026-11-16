@@ -1,4 +1,5 @@
 import { AnnotationMode } from 'pdfjs-dist';
+import { t } from './i18n';
 import { emit, livePages, store } from './store';
 import { icon } from './ui';
 import type { Viewer } from './viewer';
@@ -64,7 +65,7 @@ export class Thumbnails {
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'thumb-del';
-      del.title = '이 페이지 삭제';
+      del.title = t('thumb.delete');
       del.tabIndex = -1;
       del.append(icon('Trash', 14));
       page.append(del);

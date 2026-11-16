@@ -1,4 +1,4 @@
-export type Tool = 'select' | 'text' | 'highlight' | 'eraser' | 'table';
+export type Tool = 'select' | 'text' | 'highlight' | 'eraser' | 'table' | 'edit';
 
 /**
  * 모든 좌표는 "페이지 단위"(= 100% 배율에서 화면에 보이는 방향 기준의 PDF 포인트)이며,
@@ -14,6 +14,19 @@ export interface TextAnnotation {
   size: number; // 글자 크기 (pt)
   color: string; // #rrggbb
   bold: boolean;
+  font?: string; // 'sans'(나눔고딕, 기본) | 'serif'(나눔명조) | 'user:<id>'(사용자가 추가한 글꼴)
+  /** '기존 글자 고치기'로 만든 글상자: 원래 글자 자리 (저장할 때 원래 글자를 지우고 이 색으로 덮는다) */
+  cover?: Cover;
+  original?: string; // 고치기 전 원래 글자
+  scaleX?: number; // 가로 비율 (문서 전체 글꼴 바꾸기에서 원래 글줄 폭에 맞출 때)
+}
+
+export interface Cover {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string; // 덮개 색 (원래 배경색)
 }
 
 export interface ImageAnnotation {

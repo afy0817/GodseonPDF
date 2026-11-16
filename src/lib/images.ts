@@ -1,4 +1,5 @@
 import { clamp } from './geometry';
+import { t } from './i18n';
 import { uid } from './store';
 import type { ImageAnnotation, ImageAsset, PageInfo } from './types';
 
@@ -49,7 +50,7 @@ async function encode(source: CanvasImageSource & { width: number; height: numbe
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, 0.92));
   canvas.width = 0;
   canvas.height = 0;
-  if (!blob) throw new Error('이미지를 변환하지 못했습니다.');
+  if (!blob) throw new Error(t('err.imageConvert'));
   return new Uint8Array(await blob.arrayBuffer());
 }
 
@@ -66,7 +67,7 @@ export async function loadImageFile(file: Blob): Promise<ImageAsset> {
   try {
     bitmap = await createImageBitmap(new Blob([bytes]));
   } catch {
-    throw new Error('이미지를 읽을 수 없습니다. PNG, JPG, GIF, WEBP, BMP 파일을 사용해 주세요.');
+    throw new Error(t('err.imageRead'));
   }
   try {
     if (kind === 'jpg' && jpegOrientation(bytes) > 1) bytes = await encode(bitmap, 'image/jpeg');
@@ -91,10 +92,20 @@ export async function reencodeAsPng(asset: ImageAsset): Promise<Uint8Array> {
   }
 }
 
-/** 페이지에 놓을 이미지 주석을 만든다. at 이 있으면 그 점을 중심으로. */
-export function makeImageAnnotation(asset: ImageAsset, page: PageInfo, at: { x: number; y: number }): ImageAnnotation {
+/** 페이지에 놓을 이미지 주석을 만든다. at 점을 중심으로. fit 을 주면 그 크기(pt) 안에 들어가게 (서명) */
+export function makeImageAnnotation(
+  asset: ImageAsset,
+  page: PageInfo,
+  at: { x: number; y: number },
+  fit?: { w: number; h: number },
+): ImageAnnotation {
   let w = asset.width * 0.75; // px → pt (96dpi 기준)
   let h = asset.height * 0.75;
+  if (fit) {
+    const f = Math.min(fit.w / w, fit.h / h);
+    w *= f;
+    h *= f;
+  }
   const k = Math.min(1, (page.width * 0.5) / w, (page.height * 0.5) / h);
   w = Math.max(8, w * k);
   h = Math.max(8, h * k);

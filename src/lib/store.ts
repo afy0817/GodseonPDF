@@ -28,7 +28,7 @@ export const store = {
   zoom: 1,
   zoomMode: 'auto' as ZoomMode,
   sidebarOpen: true,
-  textStyle: { size: 12, color: '#111827', bold: false },
+  textStyle: { size: 12, color: '#111827', bold: false, font: 'sans' as string },
   highlightStyle: { color: '#ffe14d', width: 14, opacity: 0.5 },
   tableStyle: { rows: 3, cols: 3, size: 11 },
 };

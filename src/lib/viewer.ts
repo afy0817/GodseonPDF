@@ -16,6 +16,7 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 export interface PageView {
   info: PageInfo;
   el: HTMLDivElement;
+  cover: HTMLDivElement; // '기존 글자 고치기' 덮개 (PDF 그림 바로 위, 형광펜 아래)
   hl: SVGSVGElement; // 형광펜 레이어 (multiply 합성)
   ann: HTMLDivElement; // 글상자·이미지 레이어
   canvas: HTMLCanvasElement | null;
@@ -139,9 +140,13 @@ export class Viewer {
       ann.className = 'ann-layer';
       ann.style.width = `${info.width}px`;
       ann.style.height = `${info.height}px`;
-      el.append(hl, ann);
+      const cover = document.createElement('div');
+      cover.className = 'cover-layer';
+      cover.style.width = `${info.width}px`;
+      cover.style.height = `${info.height}px`;
+      el.append(cover, hl, ann);
       frag.append(el);
-      const view: PageView = { info, el, hl, ann, canvas: null, renderedKey: '', task: null, taskKey: '', near: false };
+      const view: PageView = { info, el, cover, hl, ann, canvas: null, renderedKey: '', task: null, taskKey: '', near: false };
       this.views.push(view);
       this.byEl.set(el, view);
     }
@@ -183,6 +188,7 @@ export class Viewer {
       v.el.style.width = `${v.info.width * s}px`;
       v.el.style.height = `${v.info.height * s}px`;
       v.ann.style.transform = `scale(${s})`;
+      v.cover.style.transform = `scale(${s})`;
     }
     this.pagesEl.style.setProperty('--inv-scale', String(1 / s));
   }
@@ -452,7 +458,7 @@ export class Viewer {
     }
     releaseCanvas(v.canvas);
     v.canvas?.remove();
-    v.el.insertBefore(canvas, v.hl);
+    v.el.insertBefore(canvas, v.cover);
     v.canvas = canvas;
     v.renderedKey = key;
   }

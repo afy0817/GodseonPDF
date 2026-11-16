@@ -1,4 +1,6 @@
 import { strokeBounds, strokePathData } from './geometry';
+import { t } from './i18n';
+import { cssFamilyFor, userFont } from './userFonts';
 import { annotationsOn, getAnnotation, store } from './store';
 import { HEADER_FILL, isHeaderCell, layoutTable, TABLE_BORDER_WIDTH } from './table';
 import type { HighlightAnnotation, ImageAnnotation, TableAnnotation, TextAnnotation } from './types';
@@ -46,7 +48,7 @@ function deleteButton(): HTMLButtonElement {
   const b = document.createElement('button');
   b.type = 'button';
   b.className = 'ann-del';
-  b.title = '삭제 (Delete)';
+  b.title = t('ann.delete');
   b.tabIndex = -1;
   b.append(icon('X', 14));
   return b;
@@ -58,6 +60,7 @@ function findAnnEl(v: PageView, id: string) {
 
 function syncText(v: PageView, a: TextAnnotation): HTMLElement {
   let el = findAnnEl(v, a.id);
+  const created = !el;
   if (!el) {
     el = document.createElement('div');
     el.className = 'ann ann-text';
@@ -65,7 +68,7 @@ function syncText(v: PageView, a: TextAnnotation): HTMLElement {
     const body = document.createElement('div');
     body.className = 'ann-text-body';
     body.spellcheck = false;
-    body.dataset.placeholder = '텍스트 입력';
+    body.dataset.placeholder = t('ann.placeholder');
     body.addEventListener('input', () => handlers.onInput(a.id, readText(body)));
     body.addEventListener('blur', () => handlers.onBlur(a.id));
     body.addEventListener('keydown', (e) => handlers.onKeyDown(a.id, e));
@@ -79,14 +82,64 @@ function syncText(v: PageView, a: TextAnnotation): HTMLElement {
   s.fontSize = `${a.size}px`;
   s.color = a.color;
   s.fontWeight = a.bold ? '700' : '400';
+  s.fontFamily = cssFamilyFor(a.font);
+  // 굵은 파일이 없는 사용자 글꼴은 브라우저가 굵게를 합성 (저장할 때는 외곽선을 같이 칠해 비슷하게)
+  s.fontSynthesis = userFont(a.font) && a.bold ? 'weight' : '';
   const body = el.firstElementChild as HTMLElement;
-  if (!editing && body.textContent !== a.text) body.textContent = a.text;
+  // 새로 만든 글상자는 편집 중이어도 내용을 채운다 (기존 글자 고치기: 원래 글자를 미리 넣어 둔다)
+  if ((created || !editing) && body.textContent !== a.text) body.textContent = a.text;
   const ce = editing ? 'plaintext-only' : 'false';
   if (body.getAttribute('contenteditable') !== ce) body.setAttribute('contenteditable', ce);
   el.classList.toggle('selected', store.selectedId === a.id);
   el.classList.toggle('editing', editing);
   el.classList.toggle('light', isLight(a.color));
+  el.classList.toggle('serif', a.font === 'serif');
+  el.classList.toggle('replaced', !!a.cover);
+  s.transform = a.scaleX && a.scaleX !== 1 ? `scaleX(${a.scaleX})` : '';
   return el;
+}
+
+/** '기존 글자 고치기' 덮개: PDF 그림 바로 위(형광펜 아래)에서 원래 글자를 가린다 */
+function syncCovers(v: PageView, anns: ReturnType<typeof annotationsOn>) {
+  const covered = anns.filter((a): a is TextAnnotation => a.type === 'text' && !!a.cover);
+  const ids = new Set(covered.map((a) => a.id));
+  for (const el of Array.from(v.cover.children) as HTMLElement[]) if (!ids.has(el.dataset.id ?? '')) el.remove();
+  for (const a of covered) {
+    let el = v.cover.querySelector<HTMLElement>(`:scope > [data-id="${a.id}"]`);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'cover-rect';
+      el.dataset.id = a.id;
+      el.title = t('cover.title', { text: a.original ?? '' });
+      v.cover.append(el);
+    }
+    const c = a.cover!;
+    const s = el.style;
+    s.left = `${c.x}px`;
+    s.top = `${c.y}px`;
+    s.width = `${c.w}px`;
+    s.height = `${c.h}px`;
+    s.background = c.color;
+    el.classList.toggle('selected', store.selectedId === a.id);
+  }
+}
+
+/** 글자 고치기 도구: 마우스 아래 원래 글줄 표시 */
+export function showRunHover(v: PageView | null, r: { x: number; y: number; w: number; h: number } | null) {
+  document.querySelectorAll<HTMLElement>('.run-hover').forEach((el) => {
+    if (!v || !r || el.parentElement !== v.ann) el.remove();
+  });
+  if (!v || !r) return;
+  let el = v.ann.querySelector<HTMLElement>(':scope > .run-hover');
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'run-hover';
+    v.ann.append(el);
+  }
+  el.style.left = `${r.x - 1}px`;
+  el.style.top = `${r.y - 1}px`;
+  el.style.width = `${r.w + 2}px`;
+  el.style.height = `${r.h + 2}px`;
 }
 
 function isLight(hex: string) {
@@ -163,7 +216,7 @@ function syncTable(v: PageView, a: TableAnnotation): HTMLElement {
     handles.className = 'tbl-handles';
     const grip = document.createElement('div');
     grip.className = 'tbl-grip';
-    grip.title = '끌어서 표 옮기기';
+    grip.title = t('table.grip');
     grip.append(icon('Move', 14));
     el.append(grid, cells, handles, grip, deleteButton());
     v.ann.append(el);
@@ -300,7 +353,7 @@ export function renderPageOverlay(v: PageView) {
     if (id && !ids.has(id)) el.remove();
   }
   for (const el of Array.from(v.ann.children) as HTMLElement[]) {
-    if (el.classList.contains('hl-sel') || el.classList.contains('draft')) continue;
+    if (el.classList.contains('hl-sel') || el.classList.contains('draft') || el.classList.contains('run-hover')) continue;
     const id = el.dataset.id;
     if (!id || !ids.has(id)) el.remove();
   }
@@ -321,4 +374,5 @@ export function renderPageOverlay(v: PageView) {
     p.classList.toggle('selected', p.dataset.id === store.selectedId);
   }
   syncHighlightSelection(v);
+  syncCovers(v, anns);
 }

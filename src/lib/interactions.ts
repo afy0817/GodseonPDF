@@ -1,9 +1,12 @@
 import * as E from './editor';
-import { LINE_HEIGHT } from './fonts';
+import { baselineRatio, LINE_HEIGHT, textFontKey } from './fonts';
 import { clamp, simplify, strokeBounds, strokeHit, strokePathData } from './geometry';
+import { showRunHover } from './overlay';
 import { getAnnotation, store, uid } from './store';
 import { createTable, layoutTable, MIN_COL_WIDTH, MIN_ROW_HEIGHT } from './table';
 import type { Annotation, HighlightAnnotation, ImageAnnotation, TableAnnotation, TextAnnotation } from './types';
+import { substituteMissing } from './textLayout';
+import { coverOverlap, peekTextRuns, runAt, sampleColors, type TextRun, textRunsOf, viewSampler } from './textRuns';
 import type { PageView, Viewer } from './viewer';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -249,6 +252,71 @@ function onTablePointerDown(view: PageView, a: TableAnnotation, target: Element,
 }
 
 // ---------------------------------------------------------------------------
+// 기존 글자 고치기
+// ---------------------------------------------------------------------------
+
+/** 이 글줄을 이미 고친 글상자 */
+function replacementFor(v: PageView, r: TextRun): TextAnnotation | undefined {
+  return store.annotations.find(
+    (a): a is TextAnnotation => a.type === 'text' && a.page === v.info.index && !!a.cover && coverOverlap(a.cover, r) > 0.5,
+  );
+}
+
+function editLater(id: string, caret?: { clientX: number; clientY: number }, isNew = false) {
+  // pointerdown 의 기본 동작(포커스 이동)이 끝난 뒤에 글상자에 포커스를 준다.
+  setTimeout(() => {
+    if (getAnnotation(id)) E.startEditing(id, caret, isNew);
+  }, 0);
+}
+
+/** 원래 글줄 자리에, 같은 크기·색·비슷한 글꼴의 글상자를 만들고 바로 고치기 시작 */
+function createReplacement(v: PageView, r: TextRun, e: PointerEvent) {
+  e.preventDefault();
+  const colors = sampleColors(viewSampler(v), r);
+  const size = Math.round(r.size * 10) / 10;
+  const key = textFontKey(r.font, r.bold);
+  const a: TextAnnotation = {
+    id: uid('t'),
+    type: 'text',
+    page: v.info.index,
+    x: r.x,
+    y: r.baseline - size * baselineRatio[key],
+    text: substituteMissing(r.str, r.bold, r.font).replace(/\s+$/, ''),
+    size,
+    color: colors.text,
+    bold: r.bold,
+    font: r.font,
+    cover: { x: r.x - 0.6, y: r.y - 0.3, w: r.w + 1.2, h: r.h + 0.6, color: colors.background },
+    original: r.str,
+  };
+  store.annotations.push(a);
+  editLater(a.id, { clientX: e.clientX, clientY: e.clientY }, true);
+}
+
+function onEditToolDown(v: PageView, e: PointerEvent) {
+  const runs = peekTextRuns(v.info.index);
+  if (!runs) {
+    e.preventDefault();
+    void textRunsOf(viewer, v);
+    return;
+  }
+  const p = viewer.pagePoint(v, e.clientX, e.clientY);
+  const r = runAt(runs, p.x, p.y);
+  if (!r) {
+    E.select(null);
+    return;
+  }
+  showRunHover(null, null);
+  const existing = replacementFor(v, r);
+  if (existing) {
+    e.preventDefault();
+    editLater(existing.id, { clientX: e.clientX, clientY: e.clientY });
+    return;
+  }
+  createReplacement(v, r, e);
+}
+
+// ---------------------------------------------------------------------------
 // 글상자 만들기
 // ---------------------------------------------------------------------------
 
@@ -267,6 +335,7 @@ function createText(v: PageView, e: PointerEvent) {
     size: st.size,
     color: st.color,
     bold: st.bold,
+    font: st.font,
   };
   store.annotations.push(a);
   // pointerdown 의 기본 동작(포커스 이동)이 끝난 뒤에 글상자에 포커스를 준다.
@@ -408,6 +477,15 @@ export function setupInteractions(v: Viewer) {
     }
 
     const tool = store.tool;
+    const coverEl = target.closest<HTMLElement>('.cover-rect');
+    if (coverEl && (tool === 'select' || tool === 'edit')) {
+      const id = coverEl.dataset.id!;
+      if (tool === 'edit') {
+        e.preventDefault();
+        editLater(id);
+      } else E.select(id);
+      return;
+    }
     if (tool === 'highlight') return startStroke(view, e);
     if (tool === 'eraser') return startErase(view, e);
 
@@ -428,7 +506,7 @@ export function setupInteractions(v: Viewer) {
       const wasSelected = store.selectedId === a.id;
       E.select(a.id);
       startMove(view, a, e, () => {
-        if (a.type === 'text' && (tool === 'text' || wasSelected)) {
+        if (a.type === 'text' && (tool === 'text' || tool === 'edit' || wasSelected)) {
           E.startEditing(a.id, { clientX: e.clientX, clientY: e.clientY });
         }
       });
@@ -453,8 +531,29 @@ export function setupInteractions(v: Viewer) {
       if (!wasEditing) createTableAt(view, e);
       return;
     }
+    if (tool === 'edit') return onEditToolDown(view, e);
     E.select(null);
   });
+
+  // 글자 고치기 도구: 마우스 아래 원래 글줄을 점선으로 보여 준다
+  root.addEventListener('pointermove', (e) => {
+    if (store.tool !== 'edit' || e.buttons) return;
+    const target = e.target as Element;
+    const v = viewer.viewOf(target);
+    if (!v || target.closest('.ann, .cover-rect')) {
+      showRunHover(null, null);
+      return;
+    }
+    const runs = peekTextRuns(v.info.index);
+    if (!runs) {
+      void textRunsOf(viewer, v);
+      return;
+    }
+    const p = viewer.pagePoint(v, e.clientX, e.clientY);
+    const r = runAt(runs, p.x, p.y);
+    showRunHover(r && !replacementFor(v, r) ? v : null, r);
+  });
+  root.addEventListener('pointerleave', () => showRunHover(null, null));
 
   root.addEventListener('dblclick', (e) => {
     const cell = (e.target as Element).closest<HTMLElement>('.tbl-cell');

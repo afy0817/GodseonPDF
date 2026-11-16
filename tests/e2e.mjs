@@ -108,7 +108,14 @@ makePng(imgPath, 320, 200);
 // ---------------------------------------------------------------------------
 // 2. 앱 실행
 // ---------------------------------------------------------------------------
-const app = await electron.launch({ args: [root, pdfPath], cwd: root, env: { ...process.env, ELECTRON_ENABLE_LOGGING: '0' } });
+const userData = fs.mkdtempSync(path.join(out, 'userdata-'));
+const exportDir = path.join(out, 'export'); // 이미지로 내보내기 결과 (대화상자 없이 여기에 저장)
+fs.mkdirSync(exportDir, { recursive: true });
+const app = await electron.launch({
+  args: [root, pdfPath],
+  cwd: root,
+  env: { ...process.env, ELECTRON_ENABLE_LOGGING: '0', GODSEON_LANG: 'ko', GODSEON_USER_DATA: userData, GODSEON_TEST_SAVE_DIR: exportDir },
+});
 const win = await app.firstWindow();
 const consoleErrors = [];
 win.on('console', (m) => {
@@ -131,13 +138,25 @@ await win.screenshot({ path: path.join(out, '01-opened.png') });
 const page1 = win.locator('.page').nth(0);
 let box = await page1.boundingBox();
 const s1 = box.width / 612; // 화면 px / pt
-const at = (x, y) => ({ x: box.x + x * s1, y: box.y + y * s1 }); // 페이지 단위(위쪽 원점) → 화면
+// 페이지 단위(위쪽 원점) → 화면 좌표. 화면 밖이면 보기 영역을 스크롤해서 보이게 한다.
+const at = async (x, y) => {
+  box = await page1.boundingBox();
+  let py = box.y + y * s1;
+  const vb = await win.locator('#viewer').boundingBox();
+  if (py < vb.y + 30 || py > vb.y + vb.height - 30) {
+    await win.locator('#viewer').evaluate((el, dy) => el.scrollBy(0, dy), py - (vb.y + vb.height / 2));
+    await win.waitForTimeout(150);
+    box = await page1.boundingBox();
+    py = box.y + y * s1;
+  }
+  return { x: box.x + x * s1, y: py };
+};
 
 // ---------------------------------------------------------------------------
 // 3. 글자 입력
 // ---------------------------------------------------------------------------
 await win.click('[data-tool="text"]');
-let pt = at(150, 590);
+let pt = await at(150, 590);
 await win.mouse.click(pt.x, pt.y);
 await win.waitForSelector('.ann-text.editing');
 await win.keyboard.type('안녕하세요! ㈜갓선 글자 입력 ✓ 123');
@@ -158,11 +177,12 @@ check('글자 스타일 변경', t2.size === 20 && t2.color === '#2563eb' && t2.
 
 // 두 번째 글상자 (작은 글씨, 빨강)
 await win.click('[data-tool="text"]');
-pt = at(60, 740);
+pt = await at(60, 740);
 await win.mouse.click(pt.x, pt.y);
 await win.waitForSelector('.ann-text.editing');
 await win.keyboard.type('서명: 홍길동 (2026-11-16)');
-await win.mouse.click(box.x + box.width - 20, box.y + box.height - 20); // 바깥 클릭으로 입력 끝내기
+pt = await at(590, 30);
+await win.mouse.click(pt.x, pt.y); // 빈 곳 클릭으로 입력 끝내기
 st = await state();
 check('두 번째 글상자', st.anns.filter((a) => a.type === 'text').length === 2);
 
@@ -171,24 +191,24 @@ check('두 번째 글상자', st.anns.filter((a) => a.type === 'text').length ==
 // ---------------------------------------------------------------------------
 await win.click('[data-tool="highlight"]');
 // 두 번째 줄 (pdf y=672 → 화면 위에서 792-672=120, 글자 크기 14 → 중심 ~115)
-let a1 = at(56, 115);
-let a2 = at(470, 115);
+let a1 = await at(56, 115);
+let a2 = await at(470, 115);
 await win.mouse.move(a1.x, a1.y);
 await win.mouse.down();
 await win.mouse.move(a2.x, a2.y + 2, { steps: 25 });
 await win.mouse.up();
 // 초록색으로 세 번째 줄
 await win.click('.opt-group:not([hidden]) .swatch[data-color="#7ff09b"]');
-a1 = at(56, 143);
-a2 = at(330, 143);
+a1 = await at(56, 143);
+a2 = await at(330, 143);
 await win.mouse.move(a1.x, a1.y);
 await win.mouse.down();
 await win.mouse.move((a1.x + a2.x) / 2, a1.y - 3, { steps: 10 });
 await win.mouse.move(a2.x, a2.y, { steps: 10 });
 await win.mouse.up();
 // 지울 획
-a1 = at(100, 230);
-a2 = at(300, 260);
+a1 = await at(100, 230);
+a2 = await at(300, 260);
 await win.mouse.move(a1.x, a1.y);
 await win.mouse.down();
 await win.mouse.move(a2.x, a2.y, { steps: 12 });
@@ -198,8 +218,8 @@ check('형광펜 획 3개', st.anns.filter((a) => a.type === 'highlight').length
 
 // 지우개로 세 번째 획 지우기
 await win.click('[data-tool="eraser"]');
-a1 = at(200, 220);
-a2 = at(200, 270);
+a1 = await at(200, 220);
+a2 = await at(200, 270);
 await win.mouse.move(a1.x, a1.y);
 await win.mouse.down();
 await win.mouse.move(a2.x, a2.y, { steps: 10 });
@@ -218,7 +238,7 @@ let img = st.anns.find((a) => a.type === 'image');
 check('이미지 삽입', !!img, img ? `${img.w.toFixed(1)}x${img.h.toFixed(1)} on page ${img.page + 1}` : '');
 // 이미지를 1쪽 상자 안으로 끌어 옮기기
 let imgBox = await win.locator('.ann-image').boundingBox();
-const target = at(306, 392);
+const target = await at(306, 392);
 await win.mouse.move(imgBox.x + imgBox.width / 2, imgBox.y + imgBox.height / 2);
 await win.mouse.down();
 await win.mouse.move(target.x, target.y, { steps: 15 });
@@ -336,6 +356,86 @@ check('열 너비 조절 + 표 이동', Math.abs(tbl.cols[0] - w0 - 30) < 2 && M
 await page5.screenshot({ path: path.join(out, '06-table-screen.png') });
 
 // ---------------------------------------------------------------------------
+// 7-1b. 글꼴 추가 (TTF, TTC 에서 하나 고르기) — macOS 시스템 글꼴로 시험
+// ---------------------------------------------------------------------------
+const TTF = '/System/Library/Fonts/Supplemental/AppleMyungjo.ttf';
+const TTC = '/System/Library/Fonts/AppleSDGothicNeo.ttc';
+const fontTest = fs.existsSync(TTF) && fs.existsSync(TTC);
+if (fontTest) {
+  await win.click('[data-tool="text"]');
+  await win.setInputFiles('#font-input', TTF);
+  await win.waitForSelector('.toast-success:has-text("AppleMyungjo")');
+  b5 = await page5.boundingBox();
+  await win.mouse.click(b5.x + 60 * s5, b5.y + 470 * s5);
+  await win.waitForSelector('.ann-text.editing');
+  await win.keyboard.type('사용자 글꼴 AppleMyungjo 테스트');
+  await win.keyboard.press('Escape');
+  await win.keyboard.press('Escape');
+  await win.setInputFiles('#font-input', TTC);
+  await win.waitForSelector('.face-list');
+  const faceCount = await win.locator('.face-list label').count();
+  await win.locator('.face-list label').nth(1).click();
+  await win.click('.modal-wide button[type="submit"]');
+  await win.waitForSelector('.toast-success:has-text("Apple SD Gothic Neo")');
+  const boldBtn = win.locator('.opt-group:not([hidden]) .bold-btn');
+  if (!(await boldBtn.evaluate((el) => el.classList.contains('active')))) await boldBtn.click(); // 굵은 파일이 없는 글꼴 → 합성 굵게
+  await win.mouse.click(b5.x + 60 * s5, b5.y + 520 * s5);
+  await win.waitForSelector('.ann-text.editing');
+  await win.keyboard.type('글꼴 모음에서 고른 글꼴 굵게');
+  await win.keyboard.press('Escape');
+  const fontsJson = JSON.parse(fs.readFileSync(path.join(userData, 'fonts', 'fonts.json'), 'utf8'));
+  const userTexts = (await state()).anns.filter((a) => a.type === 'text' && String(a.font).startsWith('user:'));
+  const synth = await win.locator('.ann-text.selected').evaluate((el) => getComputedStyle(el).fontSynthesis);
+  check(
+    '글꼴 추가 (TTF, TTC 에서 고르기) + 저장해 두기',
+    faceCount > 1 && userTexts.length === 2 && fontsJson.length === 2 && synth.includes('weight'),
+    `faces=${faceCount}, saved=${fontsJson.map((f) => f.name).join(' / ')}, synthesis=${synth}`,
+  );
+  // 목록에서 지우기 (선택된 글상자의 글꼴) → 저장 파일에서도 빠짐, 글상자는 나눔고딕으로
+  await win.click('.opt-group:not([hidden]) .font-select + .icon-btn');
+  await win.waitForTimeout(300);
+  const afterRemove = JSON.parse(fs.readFileSync(path.join(userData, 'fonts', 'fonts.json'), 'utf8'));
+  check('추가한 글꼴 지우기', afterRemove.length === 1 && afterRemove[0].name.includes('AppleMyungjo'), afterRemove.map((f) => f.name).join(', '));
+  await win.click('[data-tool="select"]');
+}
+
+// ---------------------------------------------------------------------------
+// 7-2. 기존 글자 고치기 (1쪽의 원래 글줄)
+// ---------------------------------------------------------------------------
+await win.locator('.thumb[data-index="0"]').click();
+await win.waitForTimeout(400);
+box = await page1.boundingBox();
+await win.click('[data-tool="edit"]');
+const selectAllInEditor = () => win.evaluate(() => document.getSelection().selectAllChildren(document.activeElement));
+// 2번째 줄 "이 줄 위에 형광펜을 칠합니다. The quick brown fox ..." (기준선 y=120)
+pt = await at(110, 115);
+await win.mouse.move(pt.x, pt.y);
+await win.waitForTimeout(300);
+await win.mouse.move(pt.x + 2, pt.y);
+await win.waitForSelector('.run-hover');
+await win.mouse.click(pt.x, pt.y);
+await win.waitForSelector('.ann-text.replaced.editing');
+const prefilled = await win.locator('.ann-text.replaced.editing .ann-text-body').textContent();
+await selectAllInEditor();
+await win.keyboard.type('고친 문장입니다 (Edited line)');
+await win.keyboard.press('Escape');
+// 1번째 줄은 지우기 (글자를 모두 지움)
+pt = await at(110, 87);
+await win.mouse.click(pt.x, pt.y);
+await win.waitForSelector('.ann-text.replaced.editing');
+await selectAllInEditor();
+await win.keyboard.press('Backspace');
+await win.keyboard.press('Escape');
+st = await state();
+const repl = st.anns.filter((a) => a.type === 'text' && a.cover);
+check(
+  '기존 글자 고치기 (원래 글자 채워짐 → 수정, 지우기)',
+  prefilled.includes('The quick brown fox') && repl.length === 2 && repl.some((a) => a.text === '고친 문장입니다 (Edited line)') && repl.some((a) => a.text === ''),
+  `prefilled=${JSON.stringify(prefilled.slice(0, 30))} → ${repl.map((a) => JSON.stringify(a.text)).join(', ')}`,
+);
+await win.click('[data-tool="select"]');
+
+// ---------------------------------------------------------------------------
 // 8. 페이지 삭제 (4쪽)
 // ---------------------------------------------------------------------------
 await win.locator('.thumb[data-index="3"]').scrollIntoViewIfNeeded();
@@ -360,6 +460,12 @@ await win.click('[data-cmd="save"]');
 await win.waitForSelector('.toast-success', { timeout: 20000 });
 st = await state();
 check('저장 완료 + dirty 해제', st.dirty === false);
+{
+  const savedToast = win.locator('.toast-success', { hasText: '저장했습니다' }).first();
+  await savedToast.locator('.toast-close').click();
+  await win.waitForTimeout(400);
+  check('알림 닫기 단추', (await win.locator('.toast-success', { hasText: '저장했습니다' }).count()) === 0);
+}
 
 const saved = await PDFDocument.load(fs.readFileSync(pdfPath));
 check('저장된 PDF 페이지 수 4', saved.getPageCount() === 4, `${saved.getPageCount()}`);
@@ -372,6 +478,11 @@ execFileSync('pdftoppm', ['-png', '-cropbox', '-r', '60', pdfPath, path.join(out
 const text = execFileSync('pdftotext', ['-layout', pdfPath, '-']).toString();
 check('저장된 PDF에 한글 텍스트(검색 가능)', text.includes('안녕하세요! ㈜갓선 글자 입력 ✓ 123') && text.includes('회전된 페이지에 쓴 글자'));
 check('삭제한 페이지 내용 없음', !text.includes('DELETE ME'));
+check('고친 글자: 원래 글자는 지워지고 새 글자만', !text.includes('The quick brown fox') && !text.includes('첫 번째 페이지') && text.includes('고친 문장입니다 (Edited line)'));
+if (fontTest) {
+  const fontsList = execFileSync('pdffonts', [pdfPath]).toString();
+  check('추가한 글꼴이 PDF에 들어감', /AppleMyungjo/.test(fontsList) && text.includes('사용자 글꼴 AppleMyungjo 테스트') && text.includes('글꼴 모음에서 고른 글꼴 굵게'));
+}
 check('저장된 PDF에 표 내용', ['항목', '수량', '단가', '비고', '사과', '1,500원', '합계', '㈜과일상회'].every((w) => text.includes(w)));
 execFileSync('pdftoppm', ['-png', '-cropbox', '-r', '110', '-f', '4', '-l', '4', pdfPath, path.join(out, '07-table-saved')]);
 
@@ -394,9 +505,277 @@ const text2 = execFileSync('pdftotext', [pdfPath, '-']).toString();
 const count = text2.split('두 번째 줄').length - 1;
 check('다시 저장해도 글자가 한 번만 들어감', count === 1, `count=${count}`);
 
+// ---------------------------------------------------------------------------
+// 10-1. 이미지로 내보내기: 고른 페이지 → ZIP, 전체 → 폴더(JPG), 직접 지정 → 한 장, 취소
+// ---------------------------------------------------------------------------
+{
+  const pngSize = (buf) => ({ w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) });
+  const jpgSize = (buf) => {
+    for (let i = 2; i + 9 < buf.length; ) {
+      if (buf[i] !== 0xff) return null;
+      const marker = buf[i + 1];
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) };
+      i += 2 + buf.readUInt16BE(i + 2);
+    }
+    return null;
+  };
+  const sizes = await win.evaluate(() => {
+    const s = window.__godseon.store;
+    return s.doc.pages.filter((p) => !s.deleted.has(p.index)).map((p) => ({ w: p.width, h: p.height }));
+  });
+  const expect = (i, dpi) => ({ w: Math.round((sizes[i].w * dpi) / 72), h: Math.round((sizes[i].h * dpi) / 72) });
+  const same = (a, b) => !!a && Math.abs(a.w - b.w) <= 1 && Math.abs(a.h - b.h) <= 1;
+  const modal = '.export-modal';
+  const pick = (name, value) => win.click(`${modal} label:has(> input[name="${name}"][value="${value}"])`);
+  const pyZip = `
+import json, sys, zipfile
+z = zipfile.ZipFile(sys.argv[1])
+bad = z.testzip()
+z.extractall(sys.argv[2])
+print(json.dumps({"bad": bad, "names": z.namelist()}))
+`;
+
+  // (1) 페이지 목록에서 1~3쪽을 고르고(클릭 + Shift 클릭) PNG 72dpi → ZIP
+  await win.locator('.thumb[data-index="0"]').click();
+  await win.locator('.thumb[data-index="2"]').click({ modifiers: ['Shift'] });
+  await win.click('[data-cmd="exportImages"]');
+  await win.waitForSelector(modal);
+  const scopeText = (await win.locator(`${modal} input[name="scope"]:checked`).evaluate((el) => el.closest('label').textContent)).replace(/\s+/g, ' ').trim();
+  check('이미지 내보내기 창: 고른 페이지가 기본으로 선택됨', scopeText.includes('선택한 페이지') && scopeText.includes('3장 (1–3쪽)'), scopeText);
+  await pick('format', 'png');
+  await pick('dpi', '72');
+  await pick('output', 'zip');
+  await win.screenshot({ path: path.join(out, '09-export-dialog.png') });
+  await win.click(`${modal} button[type="submit"]`);
+  await win.waitForSelector('.toast-success:has-text("ZIP")', { timeout: 30000 });
+  const zipFile = path.join(exportDir, 'fixture_images.zip');
+  const unzipped = path.join(out, 'export-unzipped');
+  const z = JSON.parse(execFileSync('python3', ['-c', pyZip, zipFile, unzipped]).toString());
+  const zipSizes = z.names.map((n) => pngSize(fs.readFileSync(path.join(unzipped, n))));
+  check(
+    '고른 페이지 → ZIP (이름·개수·CRC·크기)',
+    z.bad === null &&
+      JSON.stringify(z.names) === JSON.stringify(['fixture_p01.png', 'fixture_p02.png', 'fixture_p03.png']) &&
+      zipSizes.every((sz, i) => same(sz, expect(i, 72))),
+    `${z.names.join(', ')} · ${zipSizes.map((sz) => `${sz.w}×${sz.h}`).join(', ')}`,
+  );
+
+  // (2) 메뉴(파일 › 이미지로 내보내기…)에서 전체 페이지 JPG 150dpi → 폴더
+  await app.evaluate(({ Menu }) => {
+    const find = (items) => {
+      for (const it of items) {
+        if (it.label === '이미지로 내보내기…') return it;
+        const r = it.submenu && find(it.submenu.items);
+        if (r) return r;
+      }
+      return null;
+    };
+    find(Menu.getApplicationMenu().items).click();
+  });
+  await win.waitForSelector(modal);
+  await pick('scope', 'all');
+  await pick('format', 'jpg');
+  await pick('dpi', '150');
+  await pick('output', 'folder');
+  await win.click(`${modal} button[type="submit"]`);
+  await win.waitForSelector('.toast-success:has-text("폴더")', { timeout: 30000 });
+  const folder = path.join(exportDir, 'fixture_images');
+  const jpgs = fs.existsSync(folder) ? fs.readdirSync(folder).sort() : [];
+  const jpgSizes = jpgs.map((n) => jpgSize(fs.readFileSync(path.join(folder, n))));
+  check(
+    '전체 페이지 → 폴더에 JPG 낱장 (메뉴에서)',
+    JSON.stringify(jpgs) === JSON.stringify(['fixture_p01.jpg', 'fixture_p02.jpg', 'fixture_p03.jpg', 'fixture_p04.jpg']) &&
+      jpgSizes.every((sz, i) => same(sz, expect(i, 150))),
+    `${jpgs.join(', ')} · ${jpgSizes.map((sz) => (sz ? `${sz.w}×${sz.h}` : '?')).join(', ')}`,
+  );
+
+  // (3) 직접 지정: 잘못된 번호는 막고, "4" → 이미지 한 장
+  await win.click('[data-cmd="exportImages"]');
+  await win.waitForSelector(modal);
+  await win.fill(`${modal} .range-input`, '9');
+  const blocked = await win.locator(`${modal} button[type="submit"]`).isDisabled();
+  const errText = await win.locator(`${modal} [data-summary]`).textContent();
+  await win.fill(`${modal} .range-input`, '4');
+  const outputHidden = await win.locator(`${modal} [data-output]`).isHidden();
+  await pick('format', 'png');
+  await pick('dpi', '150');
+  await win.click(`${modal} button[type="submit"]`);
+  await win.waitForSelector('.toast-success:has-text("fixture_p04.png")', { timeout: 30000 });
+  const single = path.join(exportDir, 'fixture_p04.png');
+  const singleSize = fs.existsSync(single) ? pngSize(fs.readFileSync(single)) : null;
+  check(
+    '직접 지정 → 한 장 (잘못된 번호는 막음)',
+    blocked && errText.includes('1–4') && outputHidden && same(singleSize, expect(3, 150)),
+    `${errText} · ${singleSize ? `${singleSize.w}×${singleSize.h}` : 'missing'}`,
+  );
+
+  // (4) 진행 중 취소: 전체 → ZIP 을 시작하자마자 취소 → 앞서 만든 ZIP 은 그대로, 임시 파일 없음
+  //     (테스트 문서는 금방 끝나므로 이 단계에서만 이미지 만들기를 한 장에 0.7초씩 늦춘다)
+  const before = fs.readFileSync(zipFile);
+  await win.evaluate(() => {
+    const orig = HTMLCanvasElement.prototype.toBlob;
+    window.__restoreToBlob = () => (HTMLCanvasElement.prototype.toBlob = orig);
+    HTMLCanvasElement.prototype.toBlob = function (cb, ...args) {
+      setTimeout(() => orig.call(this, cb, ...args), 700);
+    };
+  });
+  await win.click('[data-cmd="exportImages"]');
+  await win.waitForSelector(modal);
+  await pick('scope', 'all');
+  await pick('dpi', '300');
+  await pick('output', 'zip');
+  await win.click(`${modal} button[type="submit"]`);
+  await win.click('#busy-cancel', { timeout: 10000 });
+  await win.waitForSelector('.toast:has-text("취소했습니다")', { timeout: 30000 });
+  await win.waitForTimeout(300);
+  await win.evaluate(() => window.__restoreToBlob());
+  const leftovers = fs.readdirSync(exportDir).filter((n) => n.endsWith('.part'));
+  check('내보내기 취소 → 기존 파일 유지, 임시 파일 없음', before.equals(fs.readFileSync(zipFile)) && leftovers.length === 0, leftovers.join(', '));
+
+  // 다음 단계를 위해 고른 페이지를 비운다
+  await win.click('[data-tool="select"]');
+}
+
+// ---------------------------------------------------------------------------
+// 10-2. 서명: 서랍 → 그리기(되돌리기) → 저장하고 넣기 → 끌어다 놓기 → 눌러서 넣기 → 지우기/되살리기 → 저장
+// ---------------------------------------------------------------------------
+{
+  const sigDir = path.join(userData, 'signatures');
+  const imageAnns = async () => (await state()).anns.filter((a) => a.type === 'image');
+  const before = (await imageAnns()).length;
+  await win.click('#sig-toggle');
+  await win.waitForSelector('#app.drawer-open .sig-empty');
+  check('서명 서랍 열기 (처음엔 비어 있음)', (await win.locator('#sig-toggle').getAttribute('aria-pressed')) === 'true');
+
+  // 서명 그리기 (좌표는 서명 칸 단위 600×220)
+  await win.click('[data-cmd="newSignature"]');
+  await win.waitForSelector('.sig-modal canvas');
+  const box = await win.locator('.sig-modal canvas').boundingBox();
+  const at = (u, v) => [box.x + (u * box.width) / 600, box.y + (v * box.height) / 220];
+  const stroke = async (pts) => {
+    await win.mouse.move(...at(...pts[0]));
+    await win.mouse.down();
+    for (const p of pts.slice(1)) await win.mouse.move(...at(...p), { steps: 2 });
+    await win.mouse.up();
+  };
+  const wave = Array.from({ length: 41 }, (_, i) => [100 + i * 5, 110 + Math.sin(i / 3) * 30]);
+  await stroke(wave); // 가로 100~300, 세로 80~140
+  await stroke([[320, 90], [370, 130], [420, 95]]);
+  await stroke([[100, 185], [330, 190], [560, 185]]); // 되돌리기 단추로 지울 획
+  await win.click('.sig-modal [data-act="undo"]');
+  await stroke([[200, 40], [260, 40]]); // ⌘/Ctrl+Z 로 지울 획
+  await win.keyboard.press(process.platform === 'darwin' ? 'Meta+Z' : 'Control+Z');
+  await win.screenshot({ path: path.join(out, '10-signature-pad.png') });
+  await win.click('.sig-modal [data-act="insert"]');
+  await win.waitForSelector('.sig-card');
+  const afterInsert = await imageAnns();
+  const first = afterInsert[afterInsert.length - 1];
+  const png = await win.evaluate(async (imageId) => {
+    const asset = window.__godseon.store.images.get(imageId);
+    const bmp = await createImageBitmap(new Blob([asset.bytes], { type: 'image/png' }));
+    const c = document.createElement('canvas');
+    c.width = bmp.width;
+    c.height = bmp.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(bmp, 0, 0);
+    const d = ctx.getImageData(0, 0, c.width, c.height).data;
+    let inked = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 200) inked++;
+    return { w: c.width, h: c.height, corner: d[3], inked, kind: asset.kind };
+  }, first.imageId);
+  const fits = Math.max(first.w / 140, first.h / 50);
+  check(
+    '서명 만들기 → 여백 잘라 투명 PNG, 되돌리기(단추·⌘Z) 반영, 페이지에 넣기',
+    afterInsert.length === before + 1 &&
+      png.kind === 'png' && png.corner === 0 && png.inked > 500 &&
+      png.w > 900 && png.w < 1100 && png.h > 150 && png.h < 260 &&
+      Math.abs(fits - 1) < 0.01,
+    `${png.w}×${png.h}px, 넣은 크기 ${first.w.toFixed(1)}×${first.h.toFixed(1)}pt`,
+  );
+  const files = () => (fs.existsSync(sigDir) ? fs.readdirSync(sigDir).filter((f) => f.endsWith('.png')) : []);
+  check('서명이 서랍(사용자 폴더)에 저장됨', files().length === 1 && (await win.locator('.sig-card').count()) === 1);
+
+  // 서랍에서 1쪽으로 끌어다 놓기 → 놓은 자리가 서명의 가운데
+  const pageEl = win.locator('.page[data-index="0"]');
+  await pageEl.scrollIntoViewIfNeeded();
+  const pb = await pageEl.boundingBox();
+  const target = { x: pb.width * 0.5, y: Math.min(pb.height * 0.8, 600) };
+  await win.locator('.sig-card').first().dragTo(pageEl, { targetPosition: target });
+  await win.waitForTimeout(300);
+  const afterDrop = await imageAnns();
+  const dropped = afterDrop[afterDrop.length - 1];
+  const info0 = await win.evaluate(() => window.__godseon.store.doc.pages[0].width);
+  const k = info0 / pb.width; // 화면 px → 페이지 단위
+  const dx = Math.abs(dropped.x + dropped.w / 2 - target.x * k);
+  const dy = Math.abs(dropped.y + dropped.h / 2 - target.y * k);
+  check(
+    '서명 끌어다 놓기 (놓은 자리에 들어감)',
+    afterDrop.length === before + 2 && dropped.page === 0 && dx < 2 && dy < 2,
+    `Δ${dx.toFixed(2)}, ${dy.toFixed(2)}pt`,
+  );
+
+  // 눌러서 넣기 → 같은 이미지를 같이 쓴다
+  await win.locator('.sig-card').first().click();
+  await win.waitForTimeout(200);
+  const afterClick = await imageAnns();
+  const sigAnns = afterClick.slice(before);
+  check('서명 눌러서 넣기 (같은 이미지 재사용)', sigAnns.length === 3 && new Set(sigAnns.map((a) => a.imageId)).size === 1);
+
+  // 서랍에서 지우기 → 알림의 실행 취소로 되살리기
+  await win.locator('.sig-card').first().hover();
+  await win.click('.sig-card .sig-del');
+  await win.waitForSelector('.sig-empty');
+  const removedFiles = files().length;
+  await win.locator('.toast', { hasText: '서명을 서랍에서 지웠습니다' }).locator('.toast-action').click();
+  await win.waitForSelector('.sig-card');
+  const listed = await win.evaluate(async () => (await window.godseon.listSignatures()).map((x) => x.data.byteLength));
+  check('서랍에서 지우기 → 실행 취소로 되살리기', removedFiles === 0 && files().length === 1 && listed.length === 1 && listed[0] > 0, `listed=${listed}`);
+  await win.screenshot({ path: path.join(out, '11-signature-placed.png') });
+
+  // 저장 → PDF 에 서명이 투명도(SMask)와 함께 한 번만 들어가고 세 곳에 그려짐
+  await win.click('[data-cmd="save"]');
+  await win.waitForFunction(() => !window.__godseon.history.dirty, null, { timeout: 20000 });
+  const rows = execFileSync('pdfimages', ['-list', pdfPath])
+    .toString()
+    .split('\n')
+    .slice(2)
+    .map((l) => l.trim().split(/\s+/))
+    .filter((c) => c.length > 11 && Number(c[3]) === png.w && Number(c[4]) === png.h);
+  const imgRows = rows.filter((c) => c[2] === 'image');
+  const maskRows = rows.filter((c) => c[2] === 'smask');
+  check(
+    '저장된 PDF에 서명 (투명 마스크, 이미지 하나를 세 번 사용)',
+    imgRows.length === 3 && maskRows.length === 3 && new Set(imgRows.map((c) => c[10])).size === 1,
+    `image=${imgRows.length} smask=${maskRows.length} objects=${[...new Set(imgRows.map((c) => c[10]))]}`,
+  );
+  await win.click('#sig-toggle');
+}
+
+// ---------------------------------------------------------------------------
+// 11. 언어 바꾸기 (한국어 ↔ English): 화면·메뉴가 바뀌고 열린 문서는 그대로
+// ---------------------------------------------------------------------------
+const annsBefore = (await state()).anns.length;
+await win.click('[data-cmd="toggleLanguage"]');
+await win.waitForTimeout(400);
+const openLabel = await win.locator('[data-cmd="open"] span').first().textContent();
+const toolLabel = await win.locator('[data-tool="table"] span').textContent();
+const menuLabels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.map((i) => i.label));
+await win.screenshot({ path: path.join(out, '08-english.png') });
+const annsAfter = (await state()).anns.length;
+check(
+  '언어 바꾸기 → English (화면·메뉴, 문서 유지)',
+  openLabel === 'Open' && toolLabel === 'Table' && menuLabels.includes('File') && menuLabels.includes('Tools') && annsAfter === annsBefore,
+  `${openLabel} / ${toolLabel} / ${menuLabels.join(',')}`,
+);
+await win.click('[data-cmd="toggleLanguage"]');
+await win.waitForTimeout(300);
+check('다시 한국어', (await win.locator('[data-cmd="open"] span').first().textContent()) === '열기');
+
 check('렌더러 콘솔 오류 없음', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 
-await app.close();
+// 저장하지 않은 변경이 남아 있어도 묻지 않고 끝낸다 (테스트가 확인 창에서 멈추지 않도록)
+await app.evaluate(({ app: electronApp }) => electronApp.exit(0)).catch(() => {});
+await app.close().catch(() => {});
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} passed. 결과물: ${path.relative(root, out)}/`);

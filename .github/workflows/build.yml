@@ -29,6 +29,11 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      - name: Unit tests (원래 글자 지우기)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y -q poppler-utils
+          npm run test:unit
 
   macos:
     needs: test

@@ -1,18 +1,42 @@
+import { convertDocumentFonts } from './lib/convert';
 import * as E from './lib/editor';
+import { chooseImageExport } from './lib/exportDialog';
 import { exportPdf } from './lib/exporter';
+import { ExportCancelled, renderPageImages, safeName } from './lib/imageExport';
 import { loadFonts } from './lib/fonts';
 import { loadImageFile, makeImageAnnotation, reencodeAsPng } from './lib/images';
 import { setupInteractions } from './lib/interactions';
 import { isEditableTarget, setupKeyboard } from './lib/keyboard';
 import { OptionsBar } from './lib/options';
+import { showRunHover } from './lib/overlay';
 import { loadPdf, PasswordCancelled } from './lib/pdf';
+import { applyI18n, getLang, onLangChange, setLang, t } from './lib/i18n';
 import * as platform from './lib/platform';
-import { emit, livePages, on, store } from './lib/store';
+import { emit, getAnnotation, livePages, on, store } from './lib/store';
+import { openSignaturePad } from './lib/signaturePad';
+import { SIGNATURE_DRAG_TYPE, SignatureDrawer, type Signature } from './lib/signatures';
+import { clearTextRuns } from './lib/textRuns';
 import { Thumbnails } from './lib/thumbnails';
-import type { ImageAnnotation, OpenedFile } from './lib/types';
-import { $, describeError, hydrateIcons, promptPassword, setBusy, toast } from './lib/ui';
+import type { ImageAnnotation, ImageAsset, OpenedFile } from './lib/types';
+import {
+  $,
+  chooseFontFace,
+  confirmConvertFonts,
+  describeError,
+  hydrateIcons,
+  isModalOpen,
+  promptPassword,
+  runModalCommand,
+  setBusy,
+  toast,
+} from './lib/ui';
+import { addFont, loadSavedFonts, readFontFile, removeUserFont, USER_PREFIX, userFont } from './lib/userFonts';
 import { Viewer, type PageView } from './lib/viewer';
+import { ZipTooLargeError, ZipWriter } from './lib/zip';
 
+setLang(platform.initialLanguage());
+document.documentElement.lang = getLang();
+applyI18n();
 hydrateIcons();
 document.documentElement.dataset.os = platform.os;
 document.documentElement.classList.toggle('electron', platform.isElectron);
@@ -20,11 +44,19 @@ document.documentElement.classList.toggle('electron', platform.isElectron);
 const app = $('#app');
 const viewer = new Viewer($('#viewer'), $('#pages'));
 const thumbs = new Thumbnails($('#thumbs'), viewer, (indices) => deletePages(indices));
-const options = new OptionsBar($('#options'));
-const fontsReady = loadFonts().catch((err) => {
-  console.error(err);
-  toast('글꼴을 불러오지 못했습니다. 글자 입력이 제대로 보이지 않을 수 있습니다.', { type: 'error' });
+const options = new OptionsBar($('#options'), {
+  convertFonts: () => run('convertFonts'),
+  addFont: () => pickFont(),
+  removeFont: (id) => void removeFont(id),
 });
+const fontsReady = loadFonts()
+  .catch((err) => {
+    console.error(err);
+    toast(t('toast.fontsFailed'), { type: 'error' });
+  })
+  .then(() => loadSavedFonts())
+  .catch((err) => console.warn(err))
+  .finally(() => options.update());
 
 E.initEditor(viewer, () => pushDocState());
 setupInteractions(viewer);
@@ -38,7 +70,7 @@ function pushDocState() {
   const dirty = !!doc && E.isDirty();
   platform.setDocState({ dirty, hasDocument: !!doc, title: doc?.name ?? '', path: doc?.path ?? null });
   const title = $('#doc-title');
-  title.textContent = doc ? doc.name : '';
+  title.textContent = doc ? doc.name : 'GodseonPDF';
   title.title = doc?.path ?? doc?.name ?? '';
   title.classList.toggle('dirty', dirty);
 }
@@ -75,6 +107,7 @@ on('history', () => {
 on('tool', () => {
   updateToolbar();
   options.update();
+  if (store.tool !== 'edit') showRunHover(null, null);
 });
 on('selection', () => options.update());
 on('style', () => options.update());
@@ -114,10 +147,11 @@ function closeDocument() {
 }
 
 async function loadDocument(file: OpenedFile) {
-  setBusy('PDF를 여는 중…');
+  setBusy(t('busy.opening'));
   try {
     const loaded = await loadPdf(file.data, promptPassword);
     closeDocument();
+    clearTextRuns();
     store.doc = {
       name: file.name,
       path: file.path,
@@ -145,7 +179,7 @@ async function loadDocument(file: OpenedFile) {
   } catch (err) {
     if (!(err instanceof PasswordCancelled)) {
       console.error(err);
-      toast(`PDF를 열 수 없습니다: ${describeError(err)}`, { type: 'error' });
+      toast(t('toast.openFailed', { msg: describeError(err) }), { type: 'error' });
     }
   } finally {
     setBusy(null);
@@ -160,7 +194,7 @@ async function openWith(getFile: () => Promise<OpenedFile | null>) {
   try {
     file = await getFile();
   } catch (err) {
-    toast(`파일을 열 수 없습니다: ${describeError(err)}`, { type: 'error' });
+    toast(t('toast.fileOpenFailed', { msg: describeError(err) }), { type: 'error' });
     return;
   }
   if (file) await loadDocument(file);
@@ -172,23 +206,33 @@ async function openWith(getFile: () => Promise<OpenedFile | null>) {
 
 let saving = false;
 
+/** 편집 내용을 넣은 PDF 를 만든다 (저장·이미지로 내보내기 공용) */
+async function buildPdf() {
+  const doc = store.doc!;
+  await fontsReady;
+  return exportPdf({
+    bytes: doc.bytes,
+    password: doc.password,
+    pages: doc.pages,
+    deleted: store.deleted,
+    annotations: store.annotations,
+    images: store.images,
+    reencodeImage: reencodeAsPng,
+  });
+}
+
+function warnMissingChars(chars: string[]) {
+  if (chars.length) toast(t('toast.missingChars', { chars: chars.slice(0, 12).join(' ') }), { type: 'warn', duration: 8000 });
+}
+
 async function save(forceDialog: boolean): Promise<boolean> {
   const doc = store.doc;
   if (!doc || saving) return false;
   E.finishEditing();
   saving = true;
-  setBusy('저장하는 중…');
+  setBusy(t('busy.saving'));
   try {
-    await fontsReady;
-    const result = await exportPdf({
-      bytes: doc.bytes,
-      password: doc.password,
-      pages: doc.pages,
-      deleted: store.deleted,
-      annotations: store.annotations,
-      images: store.images,
-      reencodeImage: reencodeAsPng,
-    });
+    const result = await buildPdf();
     setBusy(null);
     const suggested = /\.pdf$/i.test(doc.name) ? doc.name : `${doc.name}.pdf`;
     const saved = await platform.save(doc.path, result.bytes, suggested, forceDialog);
@@ -198,24 +242,216 @@ async function save(forceDialog: boolean): Promise<boolean> {
     E.history.markSaved();
     emit('history');
     pushDocState();
-    toast(platform.isElectron ? `저장했습니다: ${saved.name}` : `다운로드했습니다: ${saved.name}`, { type: 'success' });
-    if (result.missingChars.length) {
-      toast(`글꼴에 없는 문자는 PDF에 표시되지 않습니다: ${result.missingChars.slice(0, 12).join(' ')}`, { type: 'warn', duration: 8000 });
+    toast(t(platform.isElectron ? 'toast.saved' : 'toast.downloaded', { name: saved.name }), { type: 'success' });
+    warnMissingChars(result.missingChars);
+    if (result.coveredOnly) {
+      toast(t('toast.coveredOnly', { n: result.coveredOnly }), {
+        type: 'info',
+        duration: 8000,
+      });
     }
     if (result.encryption === 'removed') {
-      toast('원본 PDF의 보안 설정(인쇄·복사 제한 등)은 저장된 파일에 적용되지 않습니다.', { type: 'info', duration: 7000 });
+      toast(t('toast.encRemoved'), { type: 'info', duration: 7000 });
     } else if (result.encryption === 'kept') {
-      toast('저장된 파일도 원래 암호로 보호됩니다.', { type: 'info' });
+      toast(t('toast.encKept'), { type: 'info' });
     }
     return true;
   } catch (err) {
     console.error(err);
-    toast(`저장하지 못했습니다: ${describeError(err)}`, { type: 'error', duration: 9000 });
+    toast(t('toast.saveFailed', { msg: describeError(err) }), { type: 'error', duration: 9000 });
     return false;
   } finally {
     saving = false;
     setBusy(null);
   }
+}
+
+// ---------------------------------------------------------------------------
+// 이미지로 내보내기: 고른 페이지(또는 전체)를 PNG·JPG 로. 여러 장이면 ZIP 하나 또는 폴더에 낱장으로.
+// 저장한 PDF 와 같은 결과(편집 내용 포함, 지운 페이지 제외)를 그린다.
+// ---------------------------------------------------------------------------
+
+let exporting = false;
+
+async function exportImages() {
+  const doc = store.doc;
+  if (!doc || exporting) return;
+  E.finishEditing();
+  const live = livePages();
+  const posOf = new Map(live.map((p, i) => [p.index, i + 1]));
+  const selected = [...store.pageSelection]
+    .map((i) => posOf.get(i))
+    .filter((n): n is number => n !== undefined)
+    .sort((a, b) => a - b);
+  const choice = await chooseImageExport({
+    selected,
+    current: posOf.get(store.currentPage) ?? 1,
+    total: live.length,
+    sizeOf: (n) => live[n - 1],
+    canFolder: platform.isElectron,
+  });
+  if (!choice || exporting || store.doc !== doc) return;
+
+  const base = safeName(doc.name.replace(/\.pdf$/i, ''));
+  const digits = Math.max(2, String(live.length).length);
+  const imageName = (n: number) => `${base}_p${String(n).padStart(digits, '0')}.${choice.format}`;
+  const single = choice.pages.length === 1;
+  const mode = !single && choice.output === 'folder' ? 'folder' : 'file';
+  const name = single ? imageName(choice.pages[0]) : mode === 'folder' ? `${base}_images` : `${base}_images.zip`;
+
+  exporting = true;
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  let target: platform.ExportTarget | null = null;
+  try {
+    // 저장할 곳을 먼저 고르고(대화상자), 그다음 한 장씩 그려서 바로 쓴다
+    target = await platform.beginExport(mode, name, single ? choice.format : 'zip', doc.path);
+    if (!target) return;
+    const out = target;
+    setBusy(t('busy.exportPreparing'), cancel);
+    const pdf = await buildPdf();
+    if (controller.signal.aborted) throw new ExportCancelled();
+    const zip = mode === 'file' && !single ? new ZipWriter((chunks) => out.append(chunks)) : null;
+    await renderPageImages({
+      pdfBytes: pdf.bytes,
+      password: doc.password,
+      pageIndexes: choice.pages.map((n) => n - 1),
+      format: choice.format,
+      dpi: choice.dpi,
+      signal: controller.signal,
+      onProgress: (done, total) => setBusy(t('busy.exportProgress', { done, total }), cancel),
+      onImage: async (index, data) => {
+        if (zip) await zip.add(imageName(index + 1), data);
+        else if (mode === 'folder') await out.writeFile(imageName(index + 1), data);
+        else await out.append([data]);
+      },
+    });
+    await zip?.finish();
+    target = null;
+    const saved = await out.finish();
+    setBusy(null);
+    const n = choice.pages.length;
+    const message = !platform.isElectron
+      ? t('toast.downloaded', { name: saved.name })
+      : single
+        ? t('toast.imageSaved', { name: saved.name })
+        : t(mode === 'folder' ? 'toast.imagesFolder' : 'toast.imagesZip', { n, name: saved.name });
+    const where = saved.path;
+    toast(message, {
+      type: 'success',
+      duration: where ? 8000 : undefined,
+      action: where
+        ? { label: t(mode === 'folder' ? 'action.openFolder' : 'action.showInFolder'), run: () => platform.revealExport(where) }
+        : undefined,
+    });
+    warnMissingChars(pdf.missingChars);
+  } catch (err) {
+    await target?.abort().catch(() => {});
+    if (err instanceof ExportCancelled || controller.signal.aborted) {
+      toast(t('toast.exportCancelled'));
+    } else {
+      console.error(err);
+      const msg = err instanceof ZipTooLargeError ? t('toast.zipTooLarge') : t('toast.exportFailed', { msg: describeError(err) });
+      toast(msg, { type: 'error', duration: 9000 });
+    }
+  } finally {
+    exporting = false;
+    setBusy(null);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 서명: 그려서 서랍에 모아 두고, 끌어서 놓거나 눌러서 넣는다
+// ---------------------------------------------------------------------------
+
+const drawer = new SignatureDrawer($('#sig-list'), (sig) => void insertSignature(sig));
+const DRAWER_KEY = 'godseon.drawerOpen';
+const SIGNATURE_BOX = { w: 140, h: 50 }; // 처음 넣을 때 크기 (pt) — 넣은 뒤 모서리로 조절
+const signatureAssets = new Map<string, ImageAsset>();
+
+function setDrawerOpen(open: boolean) {
+  app.classList.toggle('drawer-open', open);
+  $('#sig-toggle').setAttribute('aria-pressed', String(open));
+  try {
+    localStorage.setItem(DRAWER_KEY, open ? '1' : '0');
+  } catch {
+    /* 기억하지 못해도 괜찮다 */
+  }
+  if (open) void drawer.load();
+}
+
+async function insertSignature(sig: Pick<Signature, 'id' | 'bytes'>, drop?: { view: PageView; x: number; y: number }) {
+  if (!store.doc) {
+    toast(t('toast.openFirst'), { type: 'warn' });
+    return;
+  }
+  E.finishEditing();
+  const view = drop?.view ?? viewer.views[store.currentPage];
+  if (!view) return;
+  // 같은 서명은 이미지 하나를 같이 쓴다 (저장한 PDF 에도 한 번만 들어간다)
+  let asset = signatureAssets.get(sig.id);
+  if (!asset || store.images.get(asset.id) !== asset) {
+    asset = await loadImageFile(new Blob([sig.bytes as Uint8Array<ArrayBuffer>], { type: 'image/png' }));
+    signatureAssets.set(sig.id, asset);
+    store.images.set(asset.id, asset);
+  }
+  const at = drop ?? viewer.visibleCenter(view);
+  E.setTool('select');
+  E.addAnnotations([makeImageAnnotation(asset, view.info, at, SIGNATURE_BOX)]);
+}
+
+async function newSignature() {
+  E.finishEditing();
+  const result = await openSignaturePad({ canInsert: !!store.doc });
+  if (!result) return;
+  setDrawerOpen(true);
+  let sig: Pick<Signature, 'id' | 'bytes'>;
+  try {
+    sig = await drawer.add(result.png);
+    if (!result.insert) toast(t('toast.sigSaved'), { type: 'success' });
+  } catch (err) {
+    console.error(err);
+    toast(t('toast.sigSaveFailed', { msg: describeError(err) }), { type: 'error', duration: 8000 });
+    sig = { id: `unsaved-${Date.now()}`, bytes: result.png }; // 서랍에 못 넣어도 문서에는 넣는다
+  }
+  if (result.insert) await insertSignature(sig);
+}
+
+// 서랍에서 페이지로 끌어다 놓기
+const hasSignature = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes(SIGNATURE_DRAG_TYPE);
+let dropPage: HTMLElement | null = null;
+function markDropPage(el: HTMLElement | null) {
+  if (dropPage === el) return;
+  dropPage?.classList.remove('drop-target');
+  el?.classList.add('drop-target');
+  dropPage = el;
+}
+const viewerEl = $('#viewer');
+viewerEl.addEventListener('dragover', (e) => {
+  if (!hasSignature(e)) return;
+  const view = store.doc && !isModalOpen() ? viewer.pageAt(e.clientX, e.clientY) : undefined;
+  markDropPage(view?.el ?? null);
+  if (!view) return; // 페이지 밖: 놓을 수 없음
+  e.preventDefault();
+  e.dataTransfer!.dropEffect = 'copy';
+});
+viewerEl.addEventListener('dragleave', (e) => {
+  if (hasSignature(e) && !viewerEl.contains(e.relatedTarget as Node | null)) markDropPage(null);
+});
+viewerEl.addEventListener('drop', (e) => {
+  if (!hasSignature(e)) return;
+  e.preventDefault();
+  markDropPage(null);
+  const sig = drawer.get(e.dataTransfer!.getData(SIGNATURE_DRAG_TYPE));
+  const view = viewer.pageAt(e.clientX, e.clientY);
+  if (sig && view) void insertSignature(sig, { view, ...viewer.pagePoint(view, e.clientX, e.clientY) });
+});
+document.addEventListener('dragend', () => markDropPage(null));
+
+try {
+  if (localStorage.getItem(DRAWER_KEY) === '1') setDrawerOpen(true);
+} catch {
+  /* 무시 */
 }
 
 // ---------------------------------------------------------------------------
@@ -235,7 +471,7 @@ async function insertImages(files: File[], drop?: { view: PageView; x: number; y
       store.images.set(asset.id, asset);
       created.push(makeImageAnnotation(asset, view.info, { x: center.x + i * 18, y: center.y + i * 18 }));
     } catch (err) {
-      toast(`${file.name || '이미지'}: ${describeError(err)}`, { type: 'error' });
+      toast(`${file.name || t('image.fallbackName')}: ${describeError(err)}`, { type: 'error' });
     }
   }
   if (!created.length) return;
@@ -263,8 +499,82 @@ function deletePages(indices?: number[]) {
   if (!store.doc) return;
   const targets = indices ?? (store.pageSelection.size ? [...store.pageSelection] : [store.currentPage]);
   const n = E.deletePages(targets);
-  if (n === -1) toast('모든 페이지를 삭제할 수는 없습니다. 최소 한 페이지는 남아 있어야 합니다.', { type: 'warn' });
-  else if (n > 0) toast(`${n}개 페이지를 삭제했습니다.`, { action: { label: '실행 취소', run: () => E.undo() } });
+  if (n === -1) toast(t('toast.cannotDeleteAll'), { type: 'warn' });
+  else if (n > 0) toast(t('toast.pagesDeleted', { n }), { action: { label: t('action.undo'), run: () => E.undo() } });
+}
+
+// ---------------------------------------------------------------------------
+// 사용자 글꼴 추가 / 지우기
+// ---------------------------------------------------------------------------
+
+const fontInput = $<HTMLInputElement>('#font-input');
+fontInput.addEventListener('change', async () => {
+  const file = fontInput.files?.[0];
+  fontInput.value = '';
+  if (!file) return;
+  try {
+    await fontsReady;
+    const faces = await readFontFile(file);
+    const face = faces.length > 1 ? await chooseFontFace(faces) : faces[0];
+    if (!face) return;
+    const uf = await addFont(face);
+    E.applyTextStyle({ font: USER_PREFIX + uf.id });
+    options.update();
+    toast(t('toast.fontAdded', { name: uf.name }), { type: 'success' });
+    if (!face.embeddable) toast(t('toast.fontNoEmbed'), { type: 'warn', duration: 9000 });
+  } catch (err) {
+    console.error(err);
+    toast(t('toast.fontAddFailed', { msg: describeError(err) }), { type: 'error' });
+  }
+});
+
+function pickFont() {
+  fontInput.click();
+}
+
+async function removeFont(id: string) {
+  const name = userFont(USER_PREFIX + id)?.name ?? '';
+  try {
+    await removeUserFont(id);
+  } catch (err) {
+    toast(describeError(err), { type: 'error' });
+    return;
+  }
+  if (store.textStyle.font === USER_PREFIX + id) store.textStyle.font = 'sans';
+  E.refresh(null); // 이 글꼴을 쓰던 글상자는 나눔고딕으로 보인다
+  options.update();
+  toast(t('toast.fontRemoved', { name }));
+}
+
+// ---------------------------------------------------------------------------
+// 문서 전체 글꼴 바꾸기 (실험 기능)
+// ---------------------------------------------------------------------------
+
+async function convertFonts() {
+  if (!store.doc) return;
+  E.finishEditing();
+  const mode = await confirmConvertFonts();
+  if (!mode) return;
+  setBusy(t('busy.converting'));
+  try {
+    await fontsReady;
+    const n = await convertDocumentFonts(viewer, mode, (done, total) => setBusy(t('busy.convertingProgress', { done, total })));
+    if (n) {
+      E.setTool('select');
+      toast(t('toast.converted', { n }), {
+        type: 'success',
+        duration: 9000,
+        action: { label: t('action.undo'), run: () => E.undo() },
+      });
+    } else {
+      toast(t('toast.convertNone'), { type: 'warn' });
+    }
+  } catch (err) {
+    console.error(err);
+    toast(t('toast.convertFailed', { msg: describeError(err) }), { type: 'error' });
+  } finally {
+    setBusy(null);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -291,6 +601,9 @@ const commands: Record<string, () => unknown> = {
   },
   insertImage: () => pickImages(),
   deletePages: () => deletePages(),
+  exportImages: () => exportImages(),
+  toggleSignatures: () => setDrawerOpen(!app.classList.contains('drawer-open')),
+  newSignature: () => newSignature(),
   deleteSelection: () => store.selectedId && E.deleteAnnotation(store.selectedId),
   escape: () => {
     if (store.selectedId) E.select(null);
@@ -301,11 +614,23 @@ const commands: Record<string, () => unknown> = {
   'tool:highlight': () => E.setTool('highlight'),
   'tool:eraser': () => E.setTool('eraser'),
   'tool:table': () => E.setTool('table'),
+  'tool:edit': () => E.setTool('edit'),
+  toggleLanguage: () => {
+    const next = getLang() === 'ko' ? 'en' : 'ko';
+    setLang(next);
+    platform.saveLanguage(next);
+  },
+  convertFonts: () => convertFonts(),
 };
 
-const NO_DOC_OK = new Set(['open', 'toggleSidebar']);
+const NO_DOC_OK = new Set(['open', 'toggleSidebar', 'toggleLanguage', 'toggleSignatures', 'newSignature']);
 
 function run(command: string) {
+  // 대화상자가 열려 있으면 메뉴·단축키는 뒤의 문서 대신 대화상자로 (예: 서명 그리기의 획 되돌리기)
+  if (isModalOpen()) {
+    runModalCommand(command);
+    return;
+  }
   if (!store.doc && !NO_DOC_OK.has(command)) return;
   const fn = commands[command];
   if (fn) Promise.resolve(fn()).catch((err) => toast(describeError(err), { type: 'error' }));
@@ -360,10 +685,10 @@ function setDropOverlay(e: DragEvent | null) {
   const hasPdf = items.some((i) => i.type === 'application/pdf');
   const hasImage = items.some((i) => i.type.startsWith('image/'));
   $('#drop-text').textContent = hasPdf
-    ? 'PDF 파일을 엽니다'
+    ? t('drop.pdf')
     : hasImage && store.doc
-      ? '놓은 위치의 페이지에 이미지를 넣습니다'
-      : 'PDF는 열고, 이미지는 페이지에 넣습니다';
+      ? t('drop.image')
+      : t('drop.any');
   overlay.classList.add('show');
 }
 
@@ -396,11 +721,11 @@ window.addEventListener('drop', (e) => {
   }
   const images = files.filter(isImageFile);
   if (!images.length) {
-    if (files.length) toast('PDF 또는 이미지 파일만 넣을 수 있습니다.', { type: 'warn' });
+    if (files.length) toast(t('toast.onlyPdfImage'), { type: 'warn' });
     return;
   }
   if (!store.doc) {
-    toast('먼저 PDF를 열어 주세요.', { type: 'warn' });
+    toast(t('toast.openFirst'), { type: 'warn' });
     return;
   }
   const view = viewer.pageAt(e.clientX, e.clientY);
@@ -424,6 +749,23 @@ document.addEventListener('paste', (e) => {
 // ---------------------------------------------------------------------------
 
 platform.onCommand(run);
+platform.onLanguage((lang) => setLang(lang));
+
+// 언어가 바뀌면 화면 문구를 모두 다시 넣는다 (열린 문서와 편집 내용은 그대로)
+onLangChange(() => {
+  applyI18n();
+  options.rebuild();
+  document.querySelectorAll<HTMLElement>('.thumb-del').forEach((b) => (b.title = t('thumb.delete')));
+  document.querySelectorAll<HTMLElement>('.ann-del').forEach((b) => (b.title = t('ann.delete')));
+  document.querySelectorAll<HTMLElement>('.ann-text-body').forEach((b) => (b.dataset.placeholder = t('ann.placeholder')));
+  document.querySelectorAll<HTMLElement>('.tbl-grip').forEach((b) => (b.title = t('table.grip')));
+  document.querySelectorAll<HTMLElement>('.cover-rect').forEach((el) => {
+    const a = getAnnotation(el.dataset.id ?? null);
+    if (a?.type === 'text') el.title = t('cover.title', { text: a.original ?? '' });
+  });
+  if (drawer.items.length || app.classList.contains('drawer-open')) drawer.render();
+  updatePageNav();
+});
 platform.onOpenFile((file) => openWith(async () => file));
 platform.onSaveAndClose(async () => {
   if (await save(false)) platform.closeConfirmed();
@@ -442,4 +784,4 @@ pushDocState();
 fontsReady.finally(() => platform.ready());
 
 // 자동화 테스트용 (상태 확인 전용)
-(window as unknown as { __godseon: unknown }).__godseon = { store, history: E.history };
+(window as unknown as { __godseon: unknown }).__godseon = { store, history: E.history, drawer };

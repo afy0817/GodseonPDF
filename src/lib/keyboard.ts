@@ -19,6 +19,7 @@ export function setupKeyboard(run: (command: string) => void, handledByMenu: boo
     if (!handledByMenu && mod && !e.altKey) {
       const k = e.key.toLowerCase();
       const map: Record<string, string> = { s: e.shiftKey ? 'saveAs' : 'save', o: 'open', '=': 'zoomIn', '+': 'zoomIn', '-': 'zoomOut', '0': 'zoomReset' };
+      if (e.shiftKey) map.e = 'exportImages';
       if (!editable) Object.assign(map, { z: e.shiftKey ? 'redo' : 'undo', y: 'redo' });
       if (map[k]) {
         e.preventDefault();
@@ -57,7 +58,9 @@ export function setupKeyboard(run: (command: string) => void, handledByMenu: boo
       KeyH: 'tool:highlight',
       KeyE: 'tool:eraser',
       KeyG: 'tool:table',
+      KeyR: 'tool:edit',
       KeyI: 'insertImage',
+      KeyS: 'toggleSignatures',
     };
     const command = byCode[e.code];
     if (command) {

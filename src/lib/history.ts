@@ -44,7 +44,9 @@ export class History {
     this.stack.length = this.index + 1;
     this.stack.push(clone(s));
     this.index += 1;
-    if (this.stack.length > LIMIT) {
+    // 주석이 아주 많으면(문서 전체 글꼴 바꾸기 등) 메모리를 아끼려고 보관하는 단계 수를 줄인다
+    const limit = Math.max(20, Math.min(LIMIT, Math.floor(300_000 / Math.max(1, s.annotations.length))));
+    while (this.stack.length > limit) {
       this.stack.shift();
       this.index -= 1;
       this.savedIndex -= 1;

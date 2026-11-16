@@ -1,5 +1,6 @@
 import * as pdfjs from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { t } from './i18n';
 import type { PageInfo } from './types';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -8,7 +9,7 @@ const asset = (rel: string) => new URL(rel, document.baseURI).href;
 
 export class PasswordCancelled extends Error {
   constructor() {
-    super('암호 입력이 취소되었습니다.');
+    super(t('pw.cancelled'));
     this.name = 'PasswordCancelled';
   }
 }
@@ -31,6 +32,7 @@ export async function loadPdf(
     wasmUrl: asset('pdfjs/wasm/'),
     iccUrl: asset('pdfjs/iccs/'),
     enableXfa: false,
+    fontExtraProperties: true, // 글꼴 이름(바탕·고딕 등)을 받아 '기존 글자 고치기'에서 비슷한 글꼴을 고른다
   });
   let password: string | undefined;
   let cancelled = false;

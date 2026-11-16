@@ -462,6 +462,23 @@ export function finishEditing() {
   }
   window.getSelection()?.removeAllRanges();
 
+  if (a.cover) {
+    // 기존 글자 고치기: 열어 보기만 하고 바꾸지 않았으면 없던 일로, 글자를 다 지웠으면 '원래 글자 지우기'로 남긴다
+    if (origin?.isNew && !midEditCommit && a.text === origin.text.replace(/\s+$/, '')) {
+      store.annotations = store.annotations.filter((x) => x.id !== id);
+      if (store.selectedId === id) store.selectedId = null;
+      refresh([a.page]);
+      emit('selection');
+      if (hadLiveChange) dirtyListener();
+      return;
+    }
+    refresh([a.page]);
+    if (!origin || origin.isNew || origin.text !== a.text || midEditCommit) commit();
+    emit('selection');
+    if (hadLiveChange) dirtyListener();
+    return;
+  }
+
   if (!a.text.trim()) {
     store.annotations = store.annotations.filter((x) => x.id !== id);
     if (store.selectedId === id) store.selectedId = null;
