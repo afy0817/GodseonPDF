@@ -133,6 +133,16 @@ const state = () => win.evaluate(() => {
 });
 check('PDF 열기 (명령줄 인자)', (await win.locator('.page').count()) === 5, `${await win.locator('.page').count()} pages`);
 check('썸네일 표시', (await win.locator('.thumb').count()) === 5);
+// 문서 보기 영역이 옵션 막대 바로 아래부터 창 아래 끝까지 채운다 (윈도우·리눅스는 앱 안 제목 줄을 숨겨도 줄이 밀리면 안 된다)
+const layout = await win.evaluate(() => {
+  const r = (s) => document.querySelector(s).getBoundingClientRect();
+  return { options: Math.round(r('#optionsbar').bottom), top: Math.round(r('#workspace').top), bottom: Math.round(r('#workspace').bottom), vh: innerHeight };
+});
+check(
+  '문서 보기 영역이 창을 채움',
+  layout.top === layout.options && layout.bottom === layout.vh,
+  `workspace ${layout.top}~${layout.bottom}, 옵션 막대 끝 ${layout.options}, 창 높이 ${layout.vh}`,
+);
 await win.screenshot({ path: path.join(out, '01-opened.png') });
 
 const page1 = win.locator('.page').nth(0);
@@ -155,7 +165,7 @@ const at = async (x, y) => {
 // ---------------------------------------------------------------------------
 // 3. 글자 입력
 // ---------------------------------------------------------------------------
-await win.click('[data-tool="text"]');
+await win.click('.tool-btn[data-tool="text"]');
 let pt = await at(150, 590);
 await win.mouse.click(pt.x, pt.y);
 await win.waitForSelector('.ann-text.editing');
@@ -177,7 +187,7 @@ check('글자 스타일 변경', t2.size === 20 && t2.color === '#2563eb' && t2.
 
 // 두 번째 글상자: 입력하는 중에 손잡이·점선 테두리로 옮기고, 놓은 뒤 이어서 입력
 {
-  await win.click('[data-tool="text"]');
+  await win.click('.tool-btn[data-tool="text"]');
   pt = await at(60, 740);
   await win.mouse.click(pt.x, pt.y);
   await win.waitForSelector('.ann-text.editing');
@@ -232,7 +242,7 @@ check('글자 스타일 변경', t2.size === 20 && t2.color === '#2563eb' && t2.
 // ---------------------------------------------------------------------------
 // 4. 형광펜
 // ---------------------------------------------------------------------------
-await win.click('[data-tool="highlight"]');
+await win.click('.tool-btn[data-tool="highlight"]');
 // 두 번째 줄 (pdf y=672 → 화면 위에서 792-672=120, 글자 크기 14 → 중심 ~115)
 let a1 = await at(56, 115);
 let a2 = await at(470, 115);
@@ -260,7 +270,7 @@ st = await state();
 check('형광펜 획 3개', st.anns.filter((a) => a.type === 'highlight').length === 3);
 
 // 지우개로 세 번째 획 지우기
-await win.click('[data-tool="eraser"]');
+await win.click('.tool-btn[data-tool="eraser"]');
 a1 = await at(200, 220);
 a2 = await at(200, 270);
 await win.mouse.move(a1.x, a1.y);
@@ -273,7 +283,7 @@ check('지우개로 획 삭제', st.anns.filter((a) => a.type === 'highlight').l
 // ---------------------------------------------------------------------------
 // 5. 이미지 첨부 (+ 이동, 크기 조절)
 // ---------------------------------------------------------------------------
-await win.click('[data-tool="select"]');
+await win.click('.tool-btn[data-tool="select"]');
 await win.setInputFiles('#image-input', imgPath);
 await win.waitForSelector('.ann-image.selected');
 st = await state();
@@ -316,12 +326,12 @@ await win.waitForTimeout(400);
 const page2 = win.locator('.page').nth(1);
 const b2 = await page2.boundingBox();
 const s2 = b2.width / 842;
-await win.click('[data-tool="text"]');
+await win.click('.tool-btn[data-tool="text"]');
 await win.mouse.click(b2.x + 60 * s2, b2.y + 120 * s2);
 await win.waitForSelector('.ann-text.editing');
 await win.keyboard.type('회전된 페이지에 쓴 글자 (가로로 보여야 함)');
 await win.keyboard.press('Escape');
-await win.click('[data-tool="highlight"]');
+await win.click('.tool-btn[data-tool="highlight"]');
 await win.mouse.move(b2.x + 60 * s2, b2.y + 200 * s2);
 await win.mouse.down();
 await win.mouse.move(b2.x + 500 * s2, b2.y + 200 * s2, { steps: 15 });
@@ -332,12 +342,12 @@ await win.waitForTimeout(400);
 const page3 = win.locator('.page').nth(2);
 const b3 = await page3.boundingBox();
 const s3 = b3.width / 512;
-await win.click('[data-tool="text"]');
+await win.click('.tool-btn[data-tool="text"]');
 await win.mouse.click(b3.x + 30 * s3, b3.y + 60 * s3);
 await win.waitForSelector('.ann-text.editing');
 await win.keyboard.type('잘린(CropBox) 페이지의 왼쪽 위 근처');
 await win.keyboard.press('Escape');
-await win.click('[data-tool="select"]');
+await win.click('.tool-btn[data-tool="select"]');
 
 // ---------------------------------------------------------------------------
 // 7-1. 표 추가·편집 (5쪽)
@@ -347,7 +357,7 @@ await win.waitForTimeout(400);
 const page5 = win.locator('.page').nth(4);
 let b5 = await page5.boundingBox();
 const s5 = b5.width / 612;
-await win.click('[data-tool="table"]');
+await win.click('.tool-btn[data-tool="table"]');
 await win.click('button[title="열 늘리기"]'); // 3열 → 4열
 await win.mouse.click(b5.x + 60 * s5, b5.y + 150 * s5);
 await win.waitForSelector('.tbl-cell.editing');
@@ -405,7 +415,7 @@ const TTF = '/System/Library/Fonts/Supplemental/AppleMyungjo.ttf';
 const TTC = '/System/Library/Fonts/AppleSDGothicNeo.ttc';
 const fontTest = fs.existsSync(TTF) && fs.existsSync(TTC);
 if (fontTest) {
-  await win.click('[data-tool="text"]');
+  await win.click('.tool-btn[data-tool="text"]');
   await win.setInputFiles('#font-input', TTF);
   await win.waitForSelector('.toast-success:has-text("AppleMyungjo")');
   b5 = await page5.boundingBox();
@@ -439,7 +449,7 @@ if (fontTest) {
   await win.waitForTimeout(300);
   const afterRemove = JSON.parse(fs.readFileSync(path.join(userData, 'fonts', 'fonts.json'), 'utf8'));
   check('추가한 글꼴 지우기', afterRemove.length === 1 && afterRemove[0].name.includes('AppleMyungjo'), afterRemove.map((f) => f.name).join(', '));
-  await win.click('[data-tool="select"]');
+  await win.click('.tool-btn[data-tool="select"]');
 }
 
 // ---------------------------------------------------------------------------
@@ -448,7 +458,7 @@ if (fontTest) {
 await win.locator('.thumb[data-index="0"]').click();
 await win.waitForTimeout(400);
 box = await page1.boundingBox();
-await win.click('[data-tool="edit"]');
+await win.click('.tool-btn[data-tool="edit"]');
 const selectAllInEditor = () => win.evaluate(() => document.getSelection().selectAllChildren(document.activeElement));
 // 2번째 줄 "이 줄 위에 형광펜을 칠합니다. The quick brown fox ..." (기준선 y=120)
 pt = await at(110, 115);
@@ -476,7 +486,7 @@ check(
   prefilled.includes('The quick brown fox') && repl.length === 2 && repl.some((a) => a.text === '고친 문장입니다 (Edited line)') && repl.some((a) => a.text === ''),
   `prefilled=${JSON.stringify(prefilled.slice(0, 30))} → ${repl.map((a) => JSON.stringify(a.text)).join(', ')}`,
 );
-await win.click('[data-tool="select"]');
+await win.click('.tool-btn[data-tool="select"]');
 
 // ---------------------------------------------------------------------------
 // 8. 페이지 삭제 (4쪽)
@@ -676,7 +686,7 @@ print(json.dumps({"bad": bad, "names": z.namelist()}))
   check('내보내기 취소 → 기존 파일 유지, 임시 파일 없음', before.equals(fs.readFileSync(zipFile)) && leftovers.length === 0, leftovers.join(', '));
 
   // 다음 단계를 위해 고른 페이지를 비운다
-  await win.click('[data-tool="select"]');
+  await win.click('.tool-btn[data-tool="select"]');
 }
 
 // ---------------------------------------------------------------------------
@@ -801,7 +811,7 @@ const annsBefore = (await state()).anns.length;
 await win.click('[data-cmd="toggleLanguage"]');
 await win.waitForTimeout(400);
 const openLabel = await win.locator('[data-cmd="open"] span').first().textContent();
-const toolLabel = await win.locator('[data-tool="table"] span').textContent();
+const toolLabel = await win.locator('.tool-btn[data-tool="table"] span').textContent();
 const menuLabels = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.map((i) => i.label));
 await win.screenshot({ path: path.join(out, '08-english.png') });
 const annsAfter = (await state()).anns.length;
