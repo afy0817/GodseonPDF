@@ -1,7 +1,7 @@
 {
   "name": "godseon-pdf",
   "productName": "GodseonPDF",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "글자 입력, 이미지 첨부, 형광펜, 페이지 삭제를 지원하는 크로스플랫폼 PDF 편집기",
   "main": "electron/main.cjs",
   "private": true,
